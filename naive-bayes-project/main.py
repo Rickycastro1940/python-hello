@@ -17,8 +17,9 @@ from sklearn.metrics import (
     confusion_matrix,
     f1_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
 from sklearn.naive_bayes import BernoulliNB, GaussianNB, MultinomialNB
+from sklearn.pipeline import Pipeline
 
 DATA_PATH = Path(__file__).resolve().parent / "data.csv"
 
@@ -101,14 +102,76 @@ def evaluate_model(name, model, X_train, X_test, y_train, y_test, labels):
     }
 
 
+def cross_validate_models(texts: pd.Series, y: pd.Series) -> pd.DataFrame:
+    """Compare all three NB variants with stratified 5-fold CV on raw text."""
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    # Dense TF-IDF transformer for GaussianNB (cannot take sparse input).
+    class DenseTfidfVectorizer(TfidfVectorizer):
+        def transform(self, raw_documents):
+            return super().transform(raw_documents).toarray()
+
+        def fit_transform(self, raw_documents, y=None):
+            return super().fit_transform(raw_documents, y).toarray()
+
+    candidates = {
+        "GaussianNB": Pipeline(
+            [
+                ("tfidf", DenseTfidfVectorizer(stop_words="english")),
+                ("clf", GaussianNB()),
+            ]
+        ),
+        "MultinomialNB": Pipeline(
+            [
+                ("tfidf", TfidfVectorizer(stop_words="english")),
+                ("clf", MultinomialNB()),
+            ]
+        ),
+        "BernoulliNB": Pipeline(
+            [
+                ("tfidf", TfidfVectorizer(stop_words="english")),
+                ("clf", BernoulliNB()),
+            ]
+        ),
+    }
+
+    rows = []
+    print("\n===== Stratified 5-Fold Cross-Validation =====")
+    for name, pipeline in candidates.items():
+        acc_scores = cross_val_score(
+            pipeline, texts, y, cv=cv, scoring="accuracy"
+        )
+        f1_scores = cross_val_score(
+            pipeline, texts, y, cv=cv, scoring="f1_weighted"
+        )
+        rows.append(
+            {
+                "model": name,
+                "cv_accuracy_mean": acc_scores.mean(),
+                "cv_accuracy_std": acc_scores.std(),
+                "cv_f1_mean": f1_scores.mean(),
+                "cv_f1_std": f1_scores.std(),
+            }
+        )
+        print(
+            f"{name}: accuracy={acc_scores.mean():.2%} ± {acc_scores.std():.2%}, "
+            f"weighted F1={f1_scores.mean():.2%} ± {f1_scores.std():.2%}"
+        )
+
+    return pd.DataFrame(rows).sort_values(
+        ["cv_accuracy_mean", "cv_f1_mean"], ascending=False
+    )
+
+
 def main() -> None:
     df = load_dataframe()
     labels = sorted(df["label"].unique())
-
-    # Shared TF-IDF features for a fair head-to-head comparison
-    vectorizer = TfidfVectorizer(stop_words="english")
-    X_sparse = vectorizer.fit_transform(df["text"])
+    texts = df["text"]
     y = df["label"]
+
+    # Shared TF-IDF features for a fair single-split head-to-head
+    vectorizer = TfidfVectorizer(stop_words="english")
+    X_sparse = vectorizer.fit_transform(texts)
 
     X_train_s, X_test_s, y_train, y_test = train_test_split(
         X_sparse,
@@ -155,42 +218,50 @@ def main() -> None:
         ),
     ]
 
-    summary = pd.DataFrame(
+    split_summary = pd.DataFrame(
         [
             {
                 "model": r["model_name"],
-                "accuracy": r["accuracy"],
-                "weighted_f1": r["f1"],
+                "holdout_accuracy": r["accuracy"],
+                "holdout_weighted_f1": r["f1"],
             }
             for r in results
         ]
-    ).sort_values(["accuracy", "weighted_f1"], ascending=False)
-
-    print("\n===== Comparison Summary =====")
-    print(summary.to_string(index=False))
-
-    best = summary.iloc[0]
-    chosen_name = "MultinomialNB"
-    chosen = next(r for r in results if r["model_name"] == chosen_name)
-
-    print(f"\nBest by metrics on this split: {best['model']}")
-    print(
-        f"Selected model for this project: {chosen_name} "
-        f"(accuracy={chosen['accuracy']:.2%}, "
-        f"weighted F1={chosen['f1']:.2%})"
+    ).sort_values(
+        ["holdout_accuracy", "holdout_weighted_f1"], ascending=False
     )
 
-    if best["model"] == chosen_name:
+    print("\n===== Hold-out Split Summary =====")
+    print(split_summary.to_string(index=False))
+
+    # More reliable ranking on this small dataset
+    cv_summary = cross_validate_models(texts, y)
+    print("\n===== Cross-Validation Ranking =====")
+    print(cv_summary.to_string(index=False))
+
+    best_cv = cv_summary.iloc[0]
+    chosen_name = "MultinomialNB"
+    chosen = next(r for r in results if r["model_name"] == chosen_name)
+    chosen_cv = cv_summary.loc[cv_summary["model"] == chosen_name].iloc[0]
+
+    print(f"\nBest by cross-validation: {best_cv['model']}")
+    print(
+        f"Selected model for this project: {chosen_name} "
+        f"(CV accuracy={chosen_cv['cv_accuracy_mean']:.2%} ± "
+        f"{chosen_cv['cv_accuracy_std']:.2%})"
+    )
+
+    if best_cv["model"] == chosen_name:
         print(
             "Confirmation: MultinomialNB is the right choice for this "
             "TF-IDF text classification task."
         )
     else:
         print(
-            f"Note: {best['model']} scored higher on this small split, "
-            "but MultinomialNB remains the theoretically preferred model "
-            "for non-negative TF-IDF / bag-of-words text features "
-            "(GaussianNB assumes continuous normals; BernoulliNB ignores "
+            f"On this tiny dataset, {best_cv['model']} edged the CV ranking, "
+            "but MultinomialNB remains the preferred model for non-negative "
+            "TF-IDF / bag-of-words text features (GaussianNB assumes continuous "
+            "normals on sparse high-dimensional data; BernoulliNB discards "
             "term-weight magnitude)."
         )
 
