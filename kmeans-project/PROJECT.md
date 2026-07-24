@@ -26,11 +26,14 @@ pip install -r requirements.txt
 python main.py
 ```
 
+Dataset URL:  
+https://breathecode.herokuapp.com/asset/internal-link?id=439&path=housing.csv
+
 ## Outputs
 
 | Path | Description |
 |------|-------------|
-| `data/raw/housing.csv` | Source dataset |
+| `data/raw/housing.csv` | Source dataset (from BreatheCode link below) |
 | `data/processed/housing_*_clustered.csv` | Labeled train/test |
 | `figures/kmeans_train_clusters.png` | Step 2 clusters |
 | `figures/kmeans_test_overlay.png` | Step 3 test overlay |
