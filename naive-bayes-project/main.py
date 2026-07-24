@@ -79,7 +79,9 @@ def load_dataframe() -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing expected columns: {sorted(missing)}")
 
-    # Tutorial preprocessing: drop app id, lowercase reviews.
+    # Only 3 raw variables: package_name, review (predictors) and polarity (label).
+    # Sentiment depends on comment content, not which app it came from, so drop
+    # package_name and keep review as the sole predictor.
     df = df.drop(columns=["package_name"]).copy()
     df["review"] = df["review"].astype(str).str.strip().str.lower()
     df = df.dropna(subset=["review", "polarity"])
@@ -89,6 +91,9 @@ def load_dataframe() -> pd.DataFrame:
         f"Loaded {DATA_PATH.name}: {len(df)} reviews "
         f"(neg={int((df['polarity'] == 0).sum())}, "
         f"pos={int((df['polarity'] == 1).sum())})"
+    )
+    print(
+        "Dropped package_name — using review text only to predict polarity."
     )
     return df
 
