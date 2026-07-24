@@ -23,7 +23,6 @@ RAW_TRAIN = ROOT / "data" / "raw" / "dogs-vs-cats" / "train"
 PROCESSED = ROOT / "data" / "processed"
 FIGURES = ROOT / "figures"
 MODELS_DIR = ROOT / "models"
-DATASET_NPZ = PROCESSED / "dogs_vs_cats_224x224.npz"
 HISTORY_PNG = FIGURES / "training_history.png"
 
 # VGG-style input size from the tutorial architecture
