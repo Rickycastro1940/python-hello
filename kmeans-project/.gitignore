@@ -1,0 +1,8 @@
+__pycache__
+.env
+.learn
+venv/
+*.joblib
+*.pkl
+.DS_Store
+figures/.gitkeep
