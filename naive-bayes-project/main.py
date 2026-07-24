@@ -1,17 +1,20 @@
-"""Spam/ham classification: Naive Bayes, then stronger alternatives.
+"""Google Play review sentiment with Naive Bayes + stronger alternatives.
 
-Why other models can beat Naive Bayes on text
+Dataset: playstore_reviews.csv (4Geeks Naive Bayes project tutorial)
+https://raw.githubusercontent.com/4GeeksAcademy/naive-bayes-project-tutorial/main/playstore_reviews.csv
+
+Columns:
+  - package_name: app id
+  - review: review text
+  - polarity: 0 = negative, 1 = positive
+
+Why alternatives can beat Naive Bayes on text
 ---------------------------------------------
-Naive Bayes assumes feature independence and models P(x|y). That is fast and
-works well on small bag-of-words data, but it is often beaten by discriminative
-linear models that learn P(y|x) directly on high-dimensional TF-IDF features:
-
-- Logistic Regression: strong, calibrated text baseline; regularized linear
-  decision boundary often generalizes better than NB on TF-IDF.
-- Linear SVM (LinearSVC): max-margin classifier; classic top performer for
-  sparse high-dimensional text.
-- Random Forest: can model non-linear word interactions, but usually needs
-  more samples than we have here and is weaker on very sparse text.
+Naive Bayes assumes feature independence. Discriminative models that learn
+P(y|x) on TF-IDF often do better:
+  - Logistic Regression: strong regularized text baseline
+  - Linear SVM: max-margin classifier for sparse high-dimensional text
+  - Random Forest: non-linear, but usually needs more data / is weaker on sparse text
 """
 
 from pathlib import Path
@@ -40,11 +43,16 @@ from sklearn.naive_bayes import BernoulliNB, GaussianNB, MultinomialNB
 from sklearn.pipeline import Pipeline
 from sklearn.svm import LinearSVC
 
-DATA_PATH = Path(__file__).resolve().parent / "data.csv"
+DATA_PATH = Path(__file__).resolve().parent / "playstore_reviews.csv"
+DATA_URL = (
+    "https://raw.githubusercontent.com/4GeeksAcademy/"
+    "naive-bayes-project-tutorial/main/playstore_reviews.csv"
+)
 MODELS_DIR = Path(__file__).resolve().parent / "models"
-MODEL_PATH = MODELS_DIR / "spam_classifier.joblib"
+MODEL_PATH = MODELS_DIR / "playstore_sentiment_model.joblib"
 CV = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 PREFERRED_NB = "MultinomialNB"
+LABEL_NAMES = ["negative", "positive"]
 
 
 class DenseTfidfVectorizer(TfidfVectorizer):
@@ -58,15 +66,34 @@ class DenseTfidfVectorizer(TfidfVectorizer):
 
 
 def load_dataframe() -> pd.DataFrame:
-    """Load data.csv when present."""
+    """Load playstore_reviews.csv; download it if the local file is missing."""
     if not DATA_PATH.exists():
-        raise FileNotFoundError(f"Dataset not found: {DATA_PATH}")
-    df = pd.read_csv(DATA_PATH)
-    print(f"Loaded dataset from {DATA_PATH.name} ({len(df)} rows)")
+        print(f"{DATA_PATH.name} missing — downloading from tutorial URL")
+        df = pd.read_csv(DATA_URL)
+        df.to_csv(DATA_PATH, index=False)
+    else:
+        df = pd.read_csv(DATA_PATH)
+
+    expected = {"package_name", "review", "polarity"}
+    missing = expected - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing expected columns: {sorted(missing)}")
+
+    # Tutorial preprocessing: drop app id, lowercase reviews.
+    df = df.drop(columns=["package_name"]).copy()
+    df["review"] = df["review"].astype(str).str.strip().str.lower()
+    df = df.dropna(subset=["review", "polarity"])
+    df["polarity"] = df["polarity"].astype(int)
+
+    print(
+        f"Loaded {DATA_PATH.name}: {len(df)} reviews "
+        f"(neg={int((df['polarity'] == 0).sum())}, "
+        f"pos={int((df['polarity'] == 1).sum())})"
+    )
     return df
 
 
-def evaluate_model(name, model, X_train, X_test, y_train, y_test, labels):
+def evaluate_model(name, model, X_train, X_test, y_train, y_test):
     """Fit a model and print hold-out metrics."""
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
@@ -76,13 +103,20 @@ def evaluate_model(name, model, X_train, X_test, y_train, y_test, labels):
     print(f"\n===== {name} =====")
     print(f"Accuracy: {accuracy:.2%}")
     print(f"Weighted F1: {f1:.2%}")
-    print(classification_report(y_test, y_pred, zero_division=0))
+    print(
+        classification_report(
+            y_test,
+            y_pred,
+            target_names=LABEL_NAMES,
+            zero_division=0,
+        )
+    )
     print("Confusion matrix:")
     print(
         pd.DataFrame(
-            confusion_matrix(y_test, y_pred, labels=labels),
-            index=labels,
-            columns=labels,
+            confusion_matrix(y_test, y_pred, labels=[0, 1]),
+            index=LABEL_NAMES,
+            columns=LABEL_NAMES,
         )
     )
     return {
@@ -119,7 +153,7 @@ def nb_pipelines() -> dict[str, Pipeline]:
 
 
 def alternative_pipelines() -> dict[str, Pipeline]:
-    """Models studied as stronger text baselines than Naive Bayes."""
+    """Models that can overcome Naive Bayes on text classification."""
     return {
         "LogisticRegression": Pipeline(
             [
@@ -180,7 +214,6 @@ def score_pipeline(name: str, pipeline: Pipeline, texts, y) -> dict:
         "cv_accuracy_std": acc_scores.std(),
         "cv_f1_mean": f1_scores.mean(),
         "cv_f1_std": f1_scores.std(),
-        "pipeline": pipeline,
     }
 
 
@@ -189,8 +222,7 @@ def cross_validate_nb(texts: pd.Series, y: pd.Series) -> pd.DataFrame:
     rows = []
     print("\n===== Naive Bayes: Stratified 5-Fold CV =====")
     for name, pipeline in nb_pipelines().items():
-        row = score_pipeline(name, pipeline, texts, y)
-        rows.append({k: v for k, v in row.items() if k != "pipeline"})
+        rows.append(score_pipeline(name, pipeline, texts, y))
     return pd.DataFrame(rows).sort_values(
         ["cv_accuracy_mean", "cv_f1_mean"], ascending=False
     )
@@ -214,16 +246,16 @@ def print_alternatives_argument() -> None:
         "Naive Bayes is a strong generative baseline, but it assumes word\n"
         "independence. Discriminative models often overcome that limit on text:\n"
         "  • LogisticRegression — learns P(y|x) with L2 regularization; usually\n"
-        "    the first model that beats MultinomialNB on TF-IDF spam/ham tasks.\n"
+        "    the first model that beats MultinomialNB on TF-IDF review tasks.\n"
         "  • LinearSVC — max-margin separator in sparse high-dimensional space;\n"
         "    a classic top text classifier in applied ML courses.\n"
         "  • RandomForest — captures non-linear interactions, but is data-hungry\n"
-        "    and often lags linear models on tiny bag-of-words datasets.\n"
+        "    and often lags linear models on bag-of-words datasets.\n"
         "We train all three and compare them with the best Naive Bayes model."
     )
 
 
-def train_alternatives(texts, y, texts_train, texts_test, y_train, y_test, labels):
+def train_alternatives(texts, y, texts_train, texts_test, y_train, y_test):
     """Train Logistic Regression, Linear SVM, and Random Forest."""
     print_alternatives_argument()
     print("\n===== Alternatives: Stratified 5-Fold CV =====")
@@ -233,9 +265,7 @@ def train_alternatives(texts, y, texts_train, texts_test, y_train, y_test, label
     fitted = {}
 
     for name, pipeline in alternative_pipelines().items():
-        cv_row = score_pipeline(name, pipeline, texts, y)
-        cv_rows.append({k: v for k, v in cv_row.items() if k != "pipeline"})
-
+        cv_rows.append(score_pipeline(name, pipeline, texts, y))
         holdout = evaluate_model(
             name,
             pipeline,
@@ -243,7 +273,6 @@ def train_alternatives(texts, y, texts_train, texts_test, y_train, y_test, label
             texts_test,
             y_train,
             y_test,
-            labels,
         )
         holdout_rows.append(holdout)
         fitted[name] = holdout["model"]
@@ -309,17 +338,17 @@ def optimize_random_forest(texts: pd.Series, y: pd.Series) -> dict:
     }
 
 
-def save_confusion_matrix(y_true, y_pred, labels, title, path):
+def save_confusion_matrix(y_true, y_pred, title, path):
     """Save a seaborn heatmap of the confusion matrix."""
-    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
     plt.figure(figsize=(5, 4))
     sns.heatmap(
         cm,
         annot=True,
         fmt="d",
         cmap="Blues",
-        xticklabels=labels,
-        yticklabels=labels,
+        xticklabels=LABEL_NAMES,
+        yticklabels=LABEL_NAMES,
     )
     plt.title(title)
     plt.xlabel("Predicted")
@@ -330,35 +359,9 @@ def save_confusion_matrix(y_true, y_pred, labels, title, path):
     print(f"Saved plot: {path}")
 
 
-def build_final_pipeline(model_name: str, estimator) -> Pipeline:
-    """Return a text→label pipeline for the winning model."""
-    # Pipelines from alternatives / tuned RF are already complete.
-    if isinstance(estimator, Pipeline):
-        return estimator
-
-    builders = {
-        "MultinomialNB": Pipeline(
-            [
-                ("counts", CountVectorizer(stop_words="english")),
-                ("clf", MultinomialNB()),
-            ]
-        ),
-        "BernoulliNB": Pipeline(
-            [
-                ("binary", CountVectorizer(stop_words="english", binary=True)),
-                ("clf", BernoulliNB()),
-            ]
-        ),
-        "GaussianNB": Pipeline(
-            [
-                ("tfidf", DenseTfidfVectorizer(stop_words="english")),
-                ("clf", GaussianNB()),
-            ]
-        ),
-    }
-    if model_name not in builders:
-        raise ValueError(f"Unknown model name: {model_name}")
-    return builders[model_name]
+def build_nb_pipeline(model_name: str) -> Pipeline:
+    """Build an unfitted NB text pipeline."""
+    return nb_pipelines()[model_name]
 
 
 def save_model(pipeline: Pipeline, model_name: str, metrics: dict) -> Path:
@@ -368,6 +371,8 @@ def save_model(pipeline: Pipeline, model_name: str, metrics: dict) -> Path:
         "model_name": model_name,
         "pipeline": pipeline,
         "metrics": metrics,
+        "dataset": DATA_PATH.name,
+        "label_map": {0: "negative", 1: "positive"},
     }
     joblib.dump(payload, MODEL_PATH)
     print(f"\nSaved model to {MODEL_PATH}")
@@ -376,11 +381,11 @@ def save_model(pipeline: Pipeline, model_name: str, metrics: dict) -> Path:
 
 def main() -> None:
     df = load_dataframe()
-    labels = sorted(df["label"].unique())
-    texts = df["text"]
-    y = df["label"]
+    texts = df["review"]
+    y = df["polarity"]
 
     print("\nStep 1 — Train GaussianNB, MultinomialNB, and BernoulliNB")
+    print(f"Dataset source: {DATA_URL}")
 
     count_vec = CountVectorizer(stop_words="english")
     binary_vec = CountVectorizer(stop_words="english", binary=True)
@@ -392,7 +397,7 @@ def main() -> None:
 
     idx_train, idx_test = train_test_split(
         np.arange(len(y)),
-        test_size=0.3,
+        test_size=0.25,
         random_state=42,
         stratify=y,
     )
@@ -408,7 +413,6 @@ def main() -> None:
             X_tfidf[idx_test],
             y_train,
             y_test,
-            labels,
         ),
         evaluate_model(
             "MultinomialNB",
@@ -417,7 +421,6 @@ def main() -> None:
             X_counts[idx_test],
             y_train,
             y_test,
-            labels,
         ),
         evaluate_model(
             "BernoulliNB",
@@ -426,7 +429,6 @@ def main() -> None:
             X_binary[idx_test],
             y_train,
             y_test,
-            labels,
         ),
     ]
 
@@ -459,9 +461,8 @@ def main() -> None:
     )
     print(f"\nBest Naive Bayes: {best_nb_name}")
 
-    # Step 2 — alternatives that can overcome NB
     alt_cv, alt_holdout, alt_fitted = train_alternatives(
-        texts, y, texts_train, texts_test, y_train, y_test, labels
+        texts, y, texts_train, texts_test, y_train, y_test
     )
     print("\n===== Alternatives CV Ranking =====")
     print(alt_cv.to_string(index=False))
@@ -474,7 +475,6 @@ def main() -> None:
         texts_test,
         y_train,
         y_test,
-        labels,
     )
 
     comparison_rows = [
@@ -508,27 +508,20 @@ def main() -> None:
     )
 
     comparison = pd.DataFrame(comparison_rows)
-    # Prefer discriminative alternatives when CV scores tie the best NB.
     comparison["is_alternative"] = comparison["model"] != best_nb_name
     comparison = comparison.sort_values(
         ["cv_accuracy", "cv_f1", "is_alternative", "holdout_accuracy"],
         ascending=[False, False, False, False],
     )
     print("\n===== Final Comparison vs Best Naive Bayes =====")
-    print(
-        comparison.drop(columns=["is_alternative"]).to_string(index=False)
-    )
+    print(comparison.drop(columns=["is_alternative"]).to_string(index=False))
 
     final_winner = comparison.iloc[0]["model"]
     print(f"\nFinal model: {final_winner}")
 
     if final_winner == best_nb_name:
-        print(
-            f"{best_nb_name} still leads on this small dataset. Linear models "
-            "are the most promising challengers as more labeled text is added."
-        )
+        print(f"{best_nb_name} remains the strongest model on this dataset.")
         final_preds = best_nb_holdout["y_pred"]
-        saved_estimator = best_nb_holdout["model"]
         winner_metrics = {
             "cv_accuracy": float(best_nb_cv["cv_accuracy_mean"]),
             "cv_f1": float(best_nb_cv["cv_f1_mean"]),
@@ -538,7 +531,6 @@ def main() -> None:
     elif final_winner == "RandomForestTuned":
         print("Tuned Random Forest overcame the best Naive Bayes result.")
         final_preds = rf_holdout["y_pred"]
-        saved_estimator = rf_tuned["estimator"]
         winner_metrics = {
             "cv_accuracy": float(rf_tuned["cv_accuracy_mean"]),
             "cv_f1": float(rf_tuned["cv_f1_mean"]),
@@ -548,19 +540,17 @@ def main() -> None:
     else:
         nb_acc = float(best_nb_cv["cv_accuracy_mean"])
         alt_acc = float(comparison.iloc[0]["cv_accuracy"])
-        if np.isclose(alt_acc, nb_acc):
+        if alt_acc > nb_acc and not np.isclose(alt_acc, nb_acc):
             print(
-                f"{final_winner} matches {best_nb_name} on CV and is selected "
-                "as the preferred discriminative alternative for text."
+                f"{final_winner} overcame Naive Bayes on playstore review sentiment."
             )
         else:
             print(
-                f"{final_winner} overcame Naive Bayes — as expected for a "
-                "discriminative linear text model on TF-IDF features."
+                f"{final_winner} matches or leads and is selected as the "
+                "preferred discriminative alternative."
             )
         hold = next(h for h in alt_holdout if h["model_name"] == final_winner)
         final_preds = hold["y_pred"]
-        saved_estimator = alt_fitted[final_winner]
         winner_row = comparison.iloc[0]
         winner_metrics = {
             "cv_accuracy": float(winner_row["cv_accuracy"]),
@@ -569,33 +559,32 @@ def main() -> None:
             "holdout_f1": float(winner_row["holdout_f1"]),
         }
 
-    # Always refit a fresh deployable pipeline on the full dataset before saving.
     if final_winner == "RandomForestTuned":
         final_pipeline = rf_tuned["estimator"]
     elif final_winner in alternative_pipelines():
         final_pipeline = alternative_pipelines()[final_winner]
     else:
-        final_pipeline = build_final_pipeline(final_winner, saved_estimator)
+        final_pipeline = build_nb_pipeline(final_winner)
     final_pipeline.fit(texts, y)
 
     save_model(final_pipeline, final_winner, winner_metrics)
     save_confusion_matrix(
         y_test,
         final_preds,
-        labels,
         f"Final model: {final_winner}",
         "confusion_matrix.png",
     )
 
     demos = [
-        "Congratulations! Claim your FREE prize now",
-        "Are we still meeting for coffee later?",
+        "this app is amazing and so easy to use love it",
+        "terrible update crashes all the time waste of space",
     ]
     loaded = joblib.load(MODEL_PATH)
     demo_preds = loaded["pipeline"].predict(demos)
+    label_map = loaded["label_map"]
     print(f"\n--- Demo Predictions from saved model ({loaded['model_name']}) ---")
-    for text, label in zip(demos, demo_preds):
-        print(f"[{label}] {text}")
+    for text, pred in zip(demos, demo_preds):
+        print(f"[{label_map[int(pred)]}] {text}")
 
 
 if __name__ == "__main__":
