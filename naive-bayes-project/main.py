@@ -256,22 +256,34 @@ def main() -> None:
     chosen_name = "MultinomialNB"
     chosen = next(r for r in results if r["model_name"] == chosen_name)
     chosen_cv = cv_summary.loc[cv_summary["model"] == chosen_name].iloc[0]
+    best_score = best_cv["cv_accuracy_mean"]
+    tied_best = cv_summary.loc[
+        np.isclose(cv_summary["cv_accuracy_mean"], best_score), "model"
+    ].tolist()
 
-    print(f"\nBest by cross-validation: {best_cv['model']}")
+    print(f"\nBest by cross-validation: {', '.join(tied_best)}")
     print(
         f"Selected model for this project: {chosen_name} "
         f"(CV accuracy={chosen_cv['cv_accuracy_mean']:.2%} ± "
         f"{chosen_cv['cv_accuracy_std']:.2%})"
     )
 
-    if best_cv["model"] == chosen_name:
-        print(
-            "Confirmation: MultinomialNB is the right choice for this "
-            "text classification task."
-        )
+    if chosen_name in tied_best:
+        if len(tied_best) == 1:
+            print(
+                "Confirmation: MultinomialNB is the right choice for this "
+                "text classification task."
+            )
+        else:
+            print(
+                "Confirmation: MultinomialNB ties for best CV score and is "
+                "the right choice for count-based bag-of-words text "
+                f"(tied with {', '.join(m for m in tied_best if m != chosen_name)}). "
+                "BernoulliNB underperforms when term frequency matters."
+            )
     else:
         print(
-            f"On this tiny dataset, {best_cv['model']} edged the CV ranking, "
+            f"On this dataset, {best_cv['model']} edged the CV ranking, "
             "but MultinomialNB remains the preferred model for count-based "
             "bag-of-words text features."
         )
