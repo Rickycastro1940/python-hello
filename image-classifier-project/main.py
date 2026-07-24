@@ -1,7 +1,7 @@
 """Dogs vs Cats image classification — Steps 2–3.
 
 Step 2: visualize samples and prepare 224x224 train/test generators.
-Step 3: build a VGG16-style CNN, train it, and measure performance.
+Step 3: finish the VGG16-style ANN (dense head), compile, train, measure.
 """
 
 from __future__ import annotations
@@ -12,15 +12,10 @@ import shutil
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
 from tensorflow.keras.layers import Conv2D, Dense, Flatten, MaxPool2D
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.preprocessing.image import (
-    ImageDataGenerator,
-    img_to_array,
-    load_img,
-)
+from tensorflow.keras.preprocessing.image import ImageDataGenerator, load_img
 
 # Paths
 ROOT = Path(__file__).resolve().parent
@@ -36,10 +31,11 @@ IMG_SIZE = (224, 224)
 TEST_FRACTION = 0.20
 RANDOM_SEED = 42
 BATCH_SIZE = 16
+# Solution uses a short Step-3 fit; keep step caps so CPU runs finish
 EPOCHS = 3
-# Limit steps so CPU training finishes in a reasonable time on full VGG
 STEPS_PER_EPOCH = 100
 VALIDATION_STEPS = 25
+LEARNING_RATE = 0.001  # matches tutorial solution Adam(learning_rate=0.001)
 
 
 def list_labeled_images(train_dir: Path) -> tuple[list[Path], list[Path]]:
@@ -150,8 +146,14 @@ def make_generators(train_dir: Path, test_dir: Path):
 
 
 def build_vgg16_like_model() -> Sequential:
-    """Build the VGG16-style CNN from the tutorial (Step 3)."""
+    """Build the VGG16-style CNN from the tutorial (Step 3).
+
+    Convolutions extract spatial features; the dense head turns them into
+    class probabilities for cat vs dog.
+    """
     model = Sequential()
+
+    # --- Convolutional feature extractor ---
     model.add(
         Conv2D(
             input_shape=(224, 224, 3),
@@ -178,11 +180,45 @@ def build_vgg16_like_model() -> Sequential:
     model.add(Conv2D(filters=512, kernel_size=(3, 3), padding="same", activation="relu"))
     model.add(Conv2D(filters=512, kernel_size=(3, 3), padding="same", activation="relu"))
     model.add(MaxPool2D(pool_size=(2, 2), strides=(2, 2)))
+
+    # --- Remaining elements: dense head for classification ---
     model.add(Flatten())
     model.add(Dense(units=4096, activation="relu"))
     model.add(Dense(units=4096, activation="relu"))
     model.add(Dense(units=2, activation="softmax"))
     return model
+
+
+def compile_model(model: Sequential) -> Sequential:
+    """Compile with Adam + categorical cross-entropy (tutorial Step 3)."""
+    model.compile(
+        optimizer=Adam(learning_rate=LEARNING_RATE),
+        loss="categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+    return model
+
+
+def train_and_measure(model: Sequential, trdata, tsdata):
+    """Train the network and report test-set performance."""
+    print(
+        f"Training for {EPOCHS} epoch(s) "
+        f"(steps_per_epoch={STEPS_PER_EPOCH}, validation_steps={VALIDATION_STEPS})..."
+    )
+    history = model.fit(
+        trdata,
+        steps_per_epoch=STEPS_PER_EPOCH,
+        validation_data=tsdata,
+        validation_steps=VALIDATION_STEPS,
+        epochs=EPOCHS,
+        verbose=1,
+    )
+
+    print("\n=== Measure performance on the test generator ===")
+    test_loss, test_acc = model.evaluate(tsdata, verbose=1)
+    print(f"Test loss: {test_loss:.4f}")
+    print(f"Test accuracy: {test_acc:.2%}")
+    return history, test_loss, test_acc
 
 
 def plot_history(history, out_path: Path) -> None:
@@ -238,39 +274,22 @@ def main() -> None:
     batch_x, batch_y = next(iter(trdata))
     print(f"trdata batch: X={batch_x.shape}, y={batch_y.shape}")
 
-    print("\n=== Step 3: Build a VGG16-style ANN ===")
+    print("\n=== Step 3: Build ANN, train, measure performance ===")
     model = build_vgg16_like_model()
-    model.compile(
-        optimizer=Adam(learning_rate=1e-4),
-        loss="categorical_crossentropy",
-        metrics=["accuracy"],
-    )
+    compile_model(model)
     model.summary()
 
-    print(
-        f"\nTraining for {EPOCHS} epoch(s) "
-        f"(steps_per_epoch={STEPS_PER_EPOCH}, validation_steps={VALIDATION_STEPS})..."
-    )
-    history = model.fit(
-        trdata,
-        steps_per_epoch=STEPS_PER_EPOCH,
-        validation_data=tsdata,
-        validation_steps=VALIDATION_STEPS,
-        epochs=EPOCHS,
-        verbose=1,
-    )
-
-    print("\n=== Evaluation on test generator ===")
-    test_loss, test_acc = model.evaluate(tsdata, verbose=1)
-    print(f"Test loss: {test_loss:.4f}")
-    print(f"Test accuracy: {test_acc:.2%}")
-
+    history, test_loss, test_acc = train_and_measure(model, trdata, tsdata)
     plot_history(history, HISTORY_PNG)
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     weights_path = MODELS_DIR / "vgg16_dogs_cats.keras"
     model.save(weights_path)
-    print(f"Saved model checkpoint to {weights_path}")
+    print(f"Saved model to {weights_path}")
+    print(
+        f"Step 3 complete — measured test accuracy: {test_acc:.2%} "
+        f"(loss={test_loss:.4f})"
+    )
 
 
 if __name__ == "__main__":
