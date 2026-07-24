@@ -8,3 +8,4 @@ __pycache__/
 .DS_Store
 todos.csv
 .cache/
+naive-bayes-project/confusion_matrix.png
