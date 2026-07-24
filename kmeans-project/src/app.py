@@ -35,8 +35,7 @@ MODELS_DIR = ROOT / "models"
 FIGURES = ROOT / "figures"
 
 DATASET_URL = (
-    "https://raw.githubusercontent.com/4GeeksAcademy/"
-    "k-means-project-tutorial/main/housing.csv"
+    "https://breathecode.herokuapp.com/asset/internal-link?id=439&path=housing.csv"
 )
 FEATURE_COLS = ["MedInc", "Latitude", "Longitude"]
 TEST_SIZE = 0.2
