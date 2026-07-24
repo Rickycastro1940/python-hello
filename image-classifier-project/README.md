@@ -44,6 +44,7 @@ CPU note: full VGG (~134M params) is heavy. Defaults use `EPOCHS=3`, `STEPS_PER_
 |------|-------------|
 | `figures/dogs_preview.png` / `cats_preview.png` | Sample grids |
 | `figures/training_history.png` | Acc/loss curves |
-| `models/vgg16_dogs_cats.keras` | Trained model |
+| `figures/test_predictions.png` | Sample test predictions |
+| `models/vgg16_1.keras` | Best checkpoint (Step 4/5) |
 
-Smoke-run test accuracy on this machine was ~50% (expected with few steps / random-init VGG); Step 4 (checkpoint + early stopping) will improve training discipline.
+`fit_generator` is deprecated/removed in modern Keras — Step 4 uses `model.fit(..., callbacks=[...])` with the same checkpoint/early-stopping objects the syllabus describes.
