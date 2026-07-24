@@ -1,81 +1,44 @@
-"""Train and evaluate a Multinomial Naive Bayes text classifier."""
-
-from pathlib import Path
-
 import pandas as pd
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.metrics import accuracy_score, classification_report
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import classification_report, confusion_matrix
 
-DATA_PATH = Path(__file__).resolve().parent / "data.csv"
-TEST_SIZE = 0.25
-RANDOM_STATE = 42
+# 1. Sample Dataset (Replace with your actual dataset/CSV)
+data = {
+    "text": [
+        "Free entry in 2 a wkly comp to win FA Cup final tkts 21st May 2005.",
+        "Nah I don't think he goes to usf, he lives around here though",
+        "WINNER!! As a valued network customer you have been selected to receive a £900 prize!",
+        "Even my brother is not like to speak with me. They treat me like aids patent.",
+        "URGENT! You have won a 1 week FREE membership in our £100,000 Prize Jackpot!",
+        "I'm gonna be home soon and i don't want to talk about this stuff anymore."
+    ],
+    "label": ["spam", "ham", "spam", "ham", "spam", "ham"]
+}
 
+df = pd.DataFrame(data)
 
-def load_data(path: Path = DATA_PATH) -> pd.DataFrame:
-    """Load labeled text data from CSV."""
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Dataset not found: {path}\n"
-            "Place a CSV with columns 'text' and 'label' as data.csv."
-        )
+# 2. Feature Extraction
+vectorizer = TfidfVectorizer(stop_words="english")
+X = vectorizer.fit_transform(df["text"])
+y = df["label"]
 
-    data = pd.read_csv(path)
-    expected = {"text", "label"}
-    missing = expected - set(data.columns)
-    if missing:
-        raise ValueError(f"Missing expected columns: {sorted(missing)}")
+# 3. Train/Test Split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, random_state=42
+)
 
-    data = data.dropna(subset=["text", "label"])
-    if data.empty:
-        raise ValueError("Dataset is empty after dropping missing values.")
+# 4. Model Training (Naive Bayes)
+model = MultinomialNB()
+model.fit(X_train, y_train)
 
-    return data
+# 5. Predictions & Evaluation
+y_pred = model.predict(X_test)
 
-
-def train_and_evaluate(data: pd.DataFrame) -> None:
-    """Vectorize text, train MultinomialNB, and print evaluation metrics."""
-    x_train, x_test, y_train, y_test = train_test_split(
-        data["text"],
-        data["label"],
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE,
-        stratify=data["label"],
-    )
-
-    vectorizer = CountVectorizer()
-    x_train_counts = vectorizer.fit_transform(x_train)
-    x_test_counts = vectorizer.transform(x_test)
-
-    model = MultinomialNB()
-    model.fit(x_train_counts, y_train)
-
-    predictions = model.predict(x_test_counts)
-    accuracy = accuracy_score(y_test, predictions)
-
-    print(f"Samples: {len(data)}")
-    print(f"Train / test: {len(x_train)} / {len(x_test)}")
-    print(f"Accuracy: {accuracy:.2%}")
-    print()
-    print(classification_report(y_test, predictions))
-
-    # Demo a few predictions on held-out phrases.
-    demos = [
-        "Free cash prize click this link",
-        "Please send the meeting agenda",
-    ]
-    demo_counts = vectorizer.transform(demos)
-    demo_preds = model.predict(demo_counts)
-    print("Demo predictions:")
-    for text, label in zip(demos, demo_preds):
-        print(f"  [{label}] {text}")
-
-
-def main() -> None:
-    data = load_data()
-    train_and_evaluate(data)
-
-
-if __name__ == "__main__":
-    main()
+print("--- Classification Report ---")
+print(classification_report(y_test, y_pred, zero_division=0))
