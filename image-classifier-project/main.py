@@ -321,6 +321,17 @@ def predict_single_image(model, image_path: Path, class_indices: dict) -> str:
     return label
 
 
+def save_model_to_folder(model, models_dir: Path = MODELS_DIR) -> Path:
+    """Step 5: store the trained model in the models/ folder."""
+    models_dir.mkdir(parents=True, exist_ok=True)
+    # Match the tutorial/solution filename stem (vgg16_1); use native .keras format
+    out_path = models_dir / "vgg16_1.keras"
+    model.save(out_path)
+    size_mb = out_path.stat().st_size / (1024 * 1024)
+    print(f"Step 5: model saved to {out_path} ({size_mb:.1f} MB)")
+    return out_path
+
+
 def prepare_data_if_needed() -> tuple:
     """Ensure preview figures + train/test generators exist."""
     dogs, cats = list_labeled_images(RAW_TRAIN)
@@ -380,8 +391,9 @@ def main() -> None:
     sample_path = Path(tsdata.filepaths[0])
     predict_single_image(best_model, sample_path, tsdata.class_indices)
 
-    print("\n=== Step 5: Model saved ===")
-    print(f"Best model stored at: {CHECKPOINT_PATH}")
+    print("\n=== Step 5: Save the model ===")
+    saved_path = save_model_to_folder(best_model, MODELS_DIR)
+    print(f"Model is ready in the models folder: {saved_path}")
 
 
 if __name__ == "__main__":

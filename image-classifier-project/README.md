@@ -1,6 +1,6 @@
 # Dogs vs Cats Image Classifier
 
-4Geeks [image-classifier-project-tutorial](https://github.com/4GeeksAcademy/image-classifier-project-tutorial) — Steps 1–3.
+4Geeks [image-classifier-project-tutorial](https://github.com/4GeeksAcademy/image-classifier-project-tutorial) — Steps 1–5.
 
 ## What is implemented
 
@@ -16,7 +16,7 @@ Matches the syllabus VGG16-style stack:
 
 - Conv blocks: 64 → 128 → 256 → 512 → 512 with `MaxPool2D`
 - Head: `Flatten` → `Dense(4096)` → `Dense(4096)` → `Dense(2, softmax)`
-- Optimizer: Adam `1e-4`, loss: `categorical_crossentropy`
+- Optimizer: Adam `0.001`, loss: `categorical_crossentropy`
 
 ## Run
 
@@ -32,11 +32,13 @@ curl -L -o dogs-vs-cats.zip \
 unzip dogs-vs-cats.zip
 cd ../..
 
-# Steps 2–3
+# Steps 2–5 (build, optimize, predict, save)
 python main.py
 ```
 
-CPU note: full VGG (~134M params) is heavy. Defaults use `EPOCHS=3`, `STEPS_PER_EPOCH=100`, `VALIDATION_STEPS=25` so a smoke-run finishes on CPU. Increase those for a real fit.
+CPU note: full VGG (~134M params) is heavy. Defaults use `EPOCHS=3`, `STEPS_PER_EPOCH=100`, `VALIDATION_STEPS=10` so a smoke-run finishes on CPU. Increase those for a real fit.
+
+**Step 5** writes the best model to `models/vgg16_1.keras` (same folder the syllabus asks for).
 
 ## Outputs
 
