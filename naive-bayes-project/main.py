@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -103,17 +103,22 @@ def evaluate_model(name, model, X_train, X_test, y_train, y_test, labels):
 
 
 def cross_validate_models(texts: pd.Series, y: pd.Series) -> pd.DataFrame:
-    """Compare all three NB variants with stratified 5-fold CV on raw text."""
+    """Compare NB variants with features matched to each model's assumptions."""
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
-    # Dense TF-IDF transformer for GaussianNB (cannot take sparse input).
     class DenseTfidfVectorizer(TfidfVectorizer):
+        """TF-IDF that returns dense arrays for GaussianNB."""
+
         def transform(self, raw_documents):
             return super().transform(raw_documents).toarray()
 
         def fit_transform(self, raw_documents, y=None):
             return super().fit_transform(raw_documents, y).toarray()
 
+    # Feature setup matched to each algorithm:
+    # - GaussianNB: continuous TF-IDF (dense)
+    # - MultinomialNB: term counts (classic text setup)
+    # - BernoulliNB: binary word presence/absence
     candidates = {
         "GaussianNB": Pipeline(
             [
@@ -123,13 +128,13 @@ def cross_validate_models(texts: pd.Series, y: pd.Series) -> pd.DataFrame:
         ),
         "MultinomialNB": Pipeline(
             [
-                ("tfidf", TfidfVectorizer(stop_words="english")),
+                ("counts", CountVectorizer(stop_words="english")),
                 ("clf", MultinomialNB()),
             ]
         ),
         "BernoulliNB": Pipeline(
             [
-                ("tfidf", TfidfVectorizer(stop_words="english")),
+                ("binary", CountVectorizer(stop_words="english", binary=True)),
                 ("clf", BernoulliNB()),
             ]
         ),
@@ -137,6 +142,10 @@ def cross_validate_models(texts: pd.Series, y: pd.Series) -> pd.DataFrame:
 
     rows = []
     print("\n===== Stratified 5-Fold Cross-Validation =====")
+    print(
+        "Features: GaussianNB=TF-IDF, MultinomialNB=counts, "
+        "BernoulliNB=binary presence"
+    )
     for name, pipeline in candidates.items():
         acc_scores = cross_val_score(
             pipeline, texts, y, cv=cv, scoring="accuracy"
@@ -169,31 +178,36 @@ def main() -> None:
     texts = df["text"]
     y = df["label"]
 
-    # Shared TF-IDF features for a fair single-split head-to-head
-    vectorizer = TfidfVectorizer(stop_words="english")
-    X_sparse = vectorizer.fit_transform(texts)
+    print("\nComparing GaussianNB vs MultinomialNB vs BernoulliNB")
+    print(
+        "Each model uses its natural feature type on the same train/test split."
+    )
 
-    X_train_s, X_test_s, y_train, y_test = train_test_split(
-        X_sparse,
-        y,
+    # Matched vectorizers for the hold-out comparison
+    count_vec = CountVectorizer(stop_words="english")
+    binary_vec = CountVectorizer(stop_words="english", binary=True)
+    tfidf_vec = TfidfVectorizer(stop_words="english")
+
+    X_counts = count_vec.fit_transform(texts)
+    X_binary = binary_vec.fit_transform(texts)
+    X_tfidf = tfidf_vec.fit_transform(texts).toarray()
+
+    idx_train, idx_test = train_test_split(
+        np.arange(len(y)),
         test_size=0.3,
         random_state=42,
         stratify=y,
     )
+    y_train, y_test = y.iloc[idx_train], y.iloc[idx_test]
 
-    # GaussianNB requires dense arrays; Multinomial/Bernoulli accept sparse.
-    X_train_dense = X_train_s.toarray()
-    X_test_dense = X_test_s.toarray()
-
-    print("\nComparing GaussianNB vs MultinomialNB vs BernoulliNB")
     print(f"Train / test sizes: {len(y_train)} / {len(y_test)}")
 
     results = [
         evaluate_model(
             "GaussianNB",
             GaussianNB(),
-            X_train_dense,
-            X_test_dense,
+            X_tfidf[idx_train],
+            X_tfidf[idx_test],
             y_train,
             y_test,
             labels,
@@ -201,8 +215,8 @@ def main() -> None:
         evaluate_model(
             "MultinomialNB",
             MultinomialNB(),
-            X_train_s,
-            X_test_s,
+            X_counts[idx_train],
+            X_counts[idx_test],
             y_train,
             y_test,
             labels,
@@ -210,8 +224,8 @@ def main() -> None:
         evaluate_model(
             "BernoulliNB",
             BernoulliNB(),
-            X_train_s,
-            X_test_s,
+            X_binary[idx_train],
+            X_binary[idx_test],
             y_train,
             y_test,
             labels,
@@ -234,7 +248,6 @@ def main() -> None:
     print("\n===== Hold-out Split Summary =====")
     print(split_summary.to_string(index=False))
 
-    # More reliable ranking on this small dataset
     cv_summary = cross_validate_models(texts, y)
     print("\n===== Cross-Validation Ranking =====")
     print(cv_summary.to_string(index=False))
@@ -254,18 +267,15 @@ def main() -> None:
     if best_cv["model"] == chosen_name:
         print(
             "Confirmation: MultinomialNB is the right choice for this "
-            "TF-IDF text classification task."
+            "text classification task."
         )
     else:
         print(
             f"On this tiny dataset, {best_cv['model']} edged the CV ranking, "
-            "but MultinomialNB remains the preferred model for non-negative "
-            "TF-IDF / bag-of-words text features (GaussianNB assumes continuous "
-            "normals on sparse high-dimensional data; BernoulliNB discards "
-            "term-weight magnitude)."
+            "but MultinomialNB remains the preferred model for count-based "
+            "bag-of-words text features."
         )
 
-    # Confusion matrix for the chosen MultinomialNB model
     cm = confusion_matrix(y_test, chosen["y_pred"], labels=labels)
     plt.figure(figsize=(5, 4))
     sns.heatmap(
@@ -283,12 +293,11 @@ def main() -> None:
     plt.savefig("confusion_matrix.png", dpi=120)
     print("\nSaved plot: confusion_matrix.png")
 
-    # Demo predictions with the chosen model
     demos = [
         "Congratulations! Claim your FREE prize now",
         "Are we still meeting for coffee later?",
     ]
-    demo_preds = chosen["model"].predict(vectorizer.transform(demos))
+    demo_preds = chosen["model"].predict(count_vec.transform(demos))
     print("\n--- Demo Predictions (MultinomialNB) ---")
     for text, label in zip(demos, demo_preds):
         print(f"[{label}] {text}")
