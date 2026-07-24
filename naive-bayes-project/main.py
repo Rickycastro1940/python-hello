@@ -1,4 +1,18 @@
-"""Train three Naive Bayes variants, pick the best, then optimize with Random Forest."""
+"""Spam/ham classification: Naive Bayes, then stronger alternatives.
+
+Why other models can beat Naive Bayes on text
+---------------------------------------------
+Naive Bayes assumes feature independence and models P(x|y). That is fast and
+works well on small bag-of-words data, but it is often beaten by discriminative
+linear models that learn P(y|x) directly on high-dimensional TF-IDF features:
+
+- Logistic Regression: strong, calibrated text baseline; regularized linear
+  decision boundary often generalizes better than NB on TF-IDF.
+- Linear SVM (LinearSVC): max-margin classifier; classic top performer for
+  sparse high-dimensional text.
+- Random Forest: can model non-linear word interactions, but usually needs
+  more samples than we have here and is weaker on very sparse text.
+"""
 
 from pathlib import Path
 
@@ -9,6 +23,7 @@ import pandas as pd
 import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -23,6 +38,7 @@ from sklearn.model_selection import (
 )
 from sklearn.naive_bayes import BernoulliNB, GaussianNB, MultinomialNB
 from sklearn.pipeline import Pipeline
+from sklearn.svm import LinearSVC
 
 DATA_PATH = Path(__file__).resolve().parent / "data.csv"
 MODELS_DIR = Path(__file__).resolve().parent / "models"
@@ -102,37 +118,86 @@ def nb_pipelines() -> dict[str, Pipeline]:
     }
 
 
+def alternative_pipelines() -> dict[str, Pipeline]:
+    """Models studied as stronger text baselines than Naive Bayes."""
+    return {
+        "LogisticRegression": Pipeline(
+            [
+                ("tfidf", TfidfVectorizer(stop_words="english", ngram_range=(1, 2))),
+                (
+                    "clf",
+                    LogisticRegression(
+                        max_iter=2000,
+                        class_weight="balanced",
+                        random_state=42,
+                    ),
+                ),
+            ]
+        ),
+        "LinearSVC": Pipeline(
+            [
+                ("tfidf", TfidfVectorizer(stop_words="english", ngram_range=(1, 2))),
+                (
+                    "clf",
+                    LinearSVC(
+                        class_weight="balanced",
+                        random_state=42,
+                        dual="auto",
+                    ),
+                ),
+            ]
+        ),
+        "RandomForest": Pipeline(
+            [
+                ("tfidf", TfidfVectorizer(stop_words="english", ngram_range=(1, 2))),
+                (
+                    "clf",
+                    RandomForestClassifier(
+                        n_estimators=200,
+                        class_weight="balanced",
+                        random_state=42,
+                        n_jobs=-1,
+                    ),
+                ),
+            ]
+        ),
+    }
+
+
+def score_pipeline(name: str, pipeline: Pipeline, texts, y) -> dict:
+    """Run stratified CV for one pipeline."""
+    acc_scores = cross_val_score(pipeline, texts, y, cv=CV, scoring="accuracy")
+    f1_scores = cross_val_score(
+        pipeline, texts, y, cv=CV, scoring="f1_weighted"
+    )
+    print(
+        f"{name}: accuracy={acc_scores.mean():.2%} ± {acc_scores.std():.2%}, "
+        f"weighted F1={f1_scores.mean():.2%} ± {f1_scores.std():.2%}"
+    )
+    return {
+        "model": name,
+        "cv_accuracy_mean": acc_scores.mean(),
+        "cv_accuracy_std": acc_scores.std(),
+        "cv_f1_mean": f1_scores.mean(),
+        "cv_f1_std": f1_scores.std(),
+        "pipeline": pipeline,
+    }
+
+
 def cross_validate_nb(texts: pd.Series, y: pd.Series) -> pd.DataFrame:
     """Rank the three Naive Bayes implementations with stratified CV."""
     rows = []
     print("\n===== Naive Bayes: Stratified 5-Fold CV =====")
     for name, pipeline in nb_pipelines().items():
-        acc_scores = cross_val_score(
-            pipeline, texts, y, cv=CV, scoring="accuracy"
-        )
-        f1_scores = cross_val_score(
-            pipeline, texts, y, cv=CV, scoring="f1_weighted"
-        )
-        rows.append(
-            {
-                "model": name,
-                "cv_accuracy_mean": acc_scores.mean(),
-                "cv_accuracy_std": acc_scores.std(),
-                "cv_f1_mean": f1_scores.mean(),
-                "cv_f1_std": f1_scores.std(),
-            }
-        )
-        print(
-            f"{name}: accuracy={acc_scores.mean():.2%} ± {acc_scores.std():.2%}, "
-            f"weighted F1={f1_scores.mean():.2%} ± {f1_scores.std():.2%}"
-        )
+        row = score_pipeline(name, pipeline, texts, y)
+        rows.append({k: v for k, v in row.items() if k != "pipeline"})
     return pd.DataFrame(rows).sort_values(
         ["cv_accuracy_mean", "cv_f1_mean"], ascending=False
     )
 
 
 def select_best_nb(cv_summary: pd.DataFrame) -> str:
-    """Pick the best NB; prefer MultinomialNB on ties (best fit for text counts)."""
+    """Pick the best NB; prefer MultinomialNB on ties."""
     best_score = cv_summary.iloc[0]["cv_accuracy_mean"]
     tied = cv_summary.loc[
         np.isclose(cv_summary["cv_accuracy_mean"], best_score), "model"
@@ -142,10 +207,56 @@ def select_best_nb(cv_summary: pd.DataFrame) -> str:
     return tied[0]
 
 
-def optimize_random_forest(texts: pd.Series, y: pd.Series) -> dict:
-    """Tune a Random Forest on TF-IDF features to try beating the best NB."""
-    print("\n===== Random Forest Optimization (RandomizedSearchCV) =====")
+def print_alternatives_argument() -> None:
+    """Explain which non-NB models can beat Naive Bayes and why."""
+    print("\n===== Why explore alternatives to Naive Bayes? =====")
+    print(
+        "Naive Bayes is a strong generative baseline, but it assumes word\n"
+        "independence. Discriminative models often overcome that limit on text:\n"
+        "  • LogisticRegression — learns P(y|x) with L2 regularization; usually\n"
+        "    the first model that beats MultinomialNB on TF-IDF spam/ham tasks.\n"
+        "  • LinearSVC — max-margin separator in sparse high-dimensional space;\n"
+        "    a classic top text classifier in applied ML courses.\n"
+        "  • RandomForest — captures non-linear interactions, but is data-hungry\n"
+        "    and often lags linear models on tiny bag-of-words datasets.\n"
+        "We train all three and compare them with the best Naive Bayes model."
+    )
 
+
+def train_alternatives(texts, y, texts_train, texts_test, y_train, y_test, labels):
+    """Train Logistic Regression, Linear SVM, and Random Forest."""
+    print_alternatives_argument()
+    print("\n===== Alternatives: Stratified 5-Fold CV =====")
+
+    cv_rows = []
+    holdout_rows = []
+    fitted = {}
+
+    for name, pipeline in alternative_pipelines().items():
+        cv_row = score_pipeline(name, pipeline, texts, y)
+        cv_rows.append({k: v for k, v in cv_row.items() if k != "pipeline"})
+
+        holdout = evaluate_model(
+            name,
+            pipeline,
+            texts_train,
+            texts_test,
+            y_train,
+            y_test,
+            labels,
+        )
+        holdout_rows.append(holdout)
+        fitted[name] = holdout["model"]
+
+    cv_df = pd.DataFrame(cv_rows).sort_values(
+        ["cv_accuracy_mean", "cv_f1_mean"], ascending=False
+    )
+    return cv_df, holdout_rows, fitted
+
+
+def optimize_random_forest(texts: pd.Series, y: pd.Series) -> dict:
+    """Optional extra tuning pass for Random Forest."""
+    print("\n===== Random Forest fine-tuning (RandomizedSearchCV) =====")
     pipeline = Pipeline(
         [
             ("tfidf", TfidfVectorizer(stop_words="english", ngram_range=(1, 2))),
@@ -159,21 +270,16 @@ def optimize_random_forest(texts: pd.Series, y: pd.Series) -> dict:
             ),
         ]
     )
-
-    param_distributions = {
-        "tfidf__min_df": [1, 2],
-        "tfidf__max_df": [0.9, 1.0],
-        "clf__n_estimators": [100, 200, 300],
-        "clf__max_depth": [None, 5, 10, 20],
-        "clf__min_samples_split": [2, 3, 5],
-        "clf__min_samples_leaf": [1, 2],
-        "clf__max_features": ["sqrt", "log2"],
-    }
-
     search = RandomizedSearchCV(
         pipeline,
-        param_distributions=param_distributions,
-        n_iter=20,
+        param_distributions={
+            "tfidf__min_df": [1, 2],
+            "clf__n_estimators": [100, 200, 300],
+            "clf__max_depth": [None, 10, 20],
+            "clf__min_samples_split": [2, 3, 5],
+            "clf__max_features": ["sqrt", "log2"],
+        },
+        n_iter=12,
         scoring="f1_weighted",
         cv=CV,
         random_state=42,
@@ -181,25 +287,21 @@ def optimize_random_forest(texts: pd.Series, y: pd.Series) -> dict:
         refit=True,
     )
     search.fit(texts, y)
-
     acc_scores = cross_val_score(
         search.best_estimator_, texts, y, cv=CV, scoring="accuracy"
     )
     f1_scores = cross_val_score(
         search.best_estimator_, texts, y, cv=CV, scoring="f1_weighted"
     )
-
     print(f"Best RF params: {search.best_params_}")
     print(
         f"Tuned RandomForest: accuracy={acc_scores.mean():.2%} ± "
         f"{acc_scores.std():.2%}, weighted F1={f1_scores.mean():.2%} ± "
         f"{f1_scores.std():.2%}"
     )
-
     return {
-        "model_name": "RandomForest",
+        "model_name": "RandomForestTuned",
         "estimator": search.best_estimator_,
-        "best_params": search.best_params_,
         "cv_accuracy_mean": acc_scores.mean(),
         "cv_accuracy_std": acc_scores.std(),
         "cv_f1_mean": f1_scores.mean(),
@@ -229,32 +331,34 @@ def save_confusion_matrix(y_true, y_pred, labels, title, path):
 
 
 def build_final_pipeline(model_name: str, estimator) -> Pipeline:
-    """Wrap the winning model as a text→prediction pipeline for persistence."""
-    if model_name == "RandomForest":
-        # Already a full Pipeline (TfidfVectorizer + RandomForestClassifier).
+    """Return a text→label pipeline for the winning model."""
+    # Pipelines from alternatives / tuned RF are already complete.
+    if isinstance(estimator, Pipeline):
         return estimator
-    if model_name == "MultinomialNB":
-        return Pipeline(
+
+    builders = {
+        "MultinomialNB": Pipeline(
             [
                 ("counts", CountVectorizer(stop_words="english")),
                 ("clf", MultinomialNB()),
             ]
-        )
-    if model_name == "BernoulliNB":
-        return Pipeline(
+        ),
+        "BernoulliNB": Pipeline(
             [
                 ("binary", CountVectorizer(stop_words="english", binary=True)),
                 ("clf", BernoulliNB()),
             ]
-        )
-    if model_name == "GaussianNB":
-        return Pipeline(
+        ),
+        "GaussianNB": Pipeline(
             [
                 ("tfidf", DenseTfidfVectorizer(stop_words="english")),
                 ("clf", GaussianNB()),
             ]
-        )
-    raise ValueError(f"Unknown model name: {model_name}")
+        ),
+    }
+    if model_name not in builders:
+        raise ValueError(f"Unknown model name: {model_name}")
+    return builders[model_name]
 
 
 def save_model(pipeline: Pipeline, model_name: str, metrics: dict) -> Path:
@@ -353,18 +457,19 @@ def main() -> None:
     best_nb_holdout = next(
         r for r in nb_holdout if r["model_name"] == best_nb_name
     )
+    print(f"\nBest Naive Bayes: {best_nb_name}")
 
-    print(f"\nStep 2 — Best Naive Bayes selected: {best_nb_name}")
-    print(
-        f"CV accuracy={best_nb_cv['cv_accuracy_mean']:.2%} ± "
-        f"{best_nb_cv['cv_accuracy_std']:.2%}"
+    # Step 2 — alternatives that can overcome NB
+    alt_cv, alt_holdout, alt_fitted = train_alternatives(
+        texts, y, texts_train, texts_test, y_train, y_test, labels
     )
+    print("\n===== Alternatives CV Ranking =====")
+    print(alt_cv.to_string(index=False))
 
-    # Step 3 — optimize with Random Forest
-    rf_result = optimize_random_forest(texts, y)
+    rf_tuned = optimize_random_forest(texts, y)
     rf_holdout = evaluate_model(
-        "RandomForest (tuned)",
-        rf_result["estimator"],
+        "RandomForestTuned",
+        rf_tuned["estimator"],
         texts_train,
         texts_test,
         y_train,
@@ -372,47 +477,55 @@ def main() -> None:
         labels,
     )
 
-    comparison = pd.DataFrame(
-        [
+    comparison_rows = [
+        {
+            "model": best_nb_name,
+            "cv_accuracy": best_nb_cv["cv_accuracy_mean"],
+            "cv_f1": best_nb_cv["cv_f1_mean"],
+            "holdout_accuracy": best_nb_holdout["accuracy"],
+            "holdout_f1": best_nb_holdout["f1"],
+        }
+    ]
+    for row in alt_cv.itertuples(index=False):
+        hold = next(h for h in alt_holdout if h["model_name"] == row.model)
+        comparison_rows.append(
             {
-                "model": best_nb_name,
-                "cv_accuracy": best_nb_cv["cv_accuracy_mean"],
-                "cv_f1": best_nb_cv["cv_f1_mean"],
-                "holdout_accuracy": best_nb_holdout["accuracy"],
-                "holdout_f1": best_nb_holdout["f1"],
-            },
-            {
-                "model": "RandomForest",
-                "cv_accuracy": rf_result["cv_accuracy_mean"],
-                "cv_f1": rf_result["cv_f1_mean"],
-                "holdout_accuracy": rf_holdout["accuracy"],
-                "holdout_f1": rf_holdout["f1"],
-            },
-        ]
-    ).sort_values(["cv_accuracy", "cv_f1"], ascending=False)
+                "model": row.model,
+                "cv_accuracy": row.cv_accuracy_mean,
+                "cv_f1": row.cv_f1_mean,
+                "holdout_accuracy": hold["accuracy"],
+                "holdout_f1": hold["f1"],
+            }
+        )
+    comparison_rows.append(
+        {
+            "model": "RandomForestTuned",
+            "cv_accuracy": rf_tuned["cv_accuracy_mean"],
+            "cv_f1": rf_tuned["cv_f1_mean"],
+            "holdout_accuracy": rf_holdout["accuracy"],
+            "holdout_f1": rf_holdout["f1"],
+        }
+    )
 
-    print("\n===== Final Comparison: Best NB vs Tuned Random Forest =====")
-    print(comparison.to_string(index=False))
+    comparison = pd.DataFrame(comparison_rows)
+    # Prefer discriminative alternatives when CV scores tie the best NB.
+    comparison["is_alternative"] = comparison["model"] != best_nb_name
+    comparison = comparison.sort_values(
+        ["cv_accuracy", "cv_f1", "is_alternative", "holdout_accuracy"],
+        ascending=[False, False, False, False],
+    )
+    print("\n===== Final Comparison vs Best Naive Bayes =====")
+    print(
+        comparison.drop(columns=["is_alternative"]).to_string(index=False)
+    )
 
     final_winner = comparison.iloc[0]["model"]
-    print(f"\nFinal optimized model: {final_winner}")
-    if final_winner == "RandomForest":
+    print(f"\nFinal model: {final_winner}")
+
+    if final_winner == best_nb_name:
         print(
-            "Random Forest improved on the best Naive Bayes result "
-            "after hyperparameter search."
-        )
-        final_preds = rf_holdout["y_pred"]
-        saved_estimator = rf_result["estimator"]
-        winner_metrics = {
-            "cv_accuracy": float(rf_result["cv_accuracy_mean"]),
-            "cv_f1": float(rf_result["cv_f1_mean"]),
-            "holdout_accuracy": float(rf_holdout["accuracy"]),
-            "holdout_f1": float(rf_holdout["f1"]),
-        }
-    else:
-        print(
-            f"{best_nb_name} remains stronger than the tuned Random Forest "
-            "on this dataset (small text sample; NB often stays competitive)."
+            f"{best_nb_name} still leads on this small dataset. Linear models "
+            "are the most promising challengers as more labeled text is added."
         )
         final_preds = best_nb_holdout["y_pred"]
         saved_estimator = best_nb_holdout["model"]
@@ -422,16 +535,50 @@ def main() -> None:
             "holdout_accuracy": float(best_nb_holdout["accuracy"]),
             "holdout_f1": float(best_nb_holdout["f1"]),
         }
-
-    # Refit a deployable text pipeline on the full dataset, then store it.
-    final_pipeline = build_final_pipeline(final_winner, saved_estimator)
-    if final_winner != "RandomForest":
-        final_pipeline.fit(texts, y)
+    elif final_winner == "RandomForestTuned":
+        print("Tuned Random Forest overcame the best Naive Bayes result.")
+        final_preds = rf_holdout["y_pred"]
+        saved_estimator = rf_tuned["estimator"]
+        winner_metrics = {
+            "cv_accuracy": float(rf_tuned["cv_accuracy_mean"]),
+            "cv_f1": float(rf_tuned["cv_f1_mean"]),
+            "holdout_accuracy": float(rf_holdout["accuracy"]),
+            "holdout_f1": float(rf_holdout["f1"]),
+        }
     else:
-        final_pipeline = saved_estimator
+        nb_acc = float(best_nb_cv["cv_accuracy_mean"])
+        alt_acc = float(comparison.iloc[0]["cv_accuracy"])
+        if np.isclose(alt_acc, nb_acc):
+            print(
+                f"{final_winner} matches {best_nb_name} on CV and is selected "
+                "as the preferred discriminative alternative for text."
+            )
+        else:
+            print(
+                f"{final_winner} overcame Naive Bayes — as expected for a "
+                "discriminative linear text model on TF-IDF features."
+            )
+        hold = next(h for h in alt_holdout if h["model_name"] == final_winner)
+        final_preds = hold["y_pred"]
+        saved_estimator = alt_fitted[final_winner]
+        winner_row = comparison.iloc[0]
+        winner_metrics = {
+            "cv_accuracy": float(winner_row["cv_accuracy"]),
+            "cv_f1": float(winner_row["cv_f1"]),
+            "holdout_accuracy": float(winner_row["holdout_accuracy"]),
+            "holdout_f1": float(winner_row["holdout_f1"]),
+        }
+
+    # Always refit a fresh deployable pipeline on the full dataset before saving.
+    if final_winner == "RandomForestTuned":
+        final_pipeline = rf_tuned["estimator"]
+    elif final_winner in alternative_pipelines():
+        final_pipeline = alternative_pipelines()[final_winner]
+    else:
+        final_pipeline = build_final_pipeline(final_winner, saved_estimator)
+    final_pipeline.fit(texts, y)
 
     save_model(final_pipeline, final_winner, winner_metrics)
-
     save_confusion_matrix(
         y_test,
         final_preds,
@@ -446,7 +593,6 @@ def main() -> None:
     ]
     loaded = joblib.load(MODEL_PATH)
     demo_preds = loaded["pipeline"].predict(demos)
-
     print(f"\n--- Demo Predictions from saved model ({loaded['model_name']}) ---")
     for text, label in zip(demos, demo_preds):
         print(f"[{label}] {text}")
