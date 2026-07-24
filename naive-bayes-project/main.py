@@ -1,8 +1,4 @@
-"""Compare GaussianNB, MultinomialNB, and BernoulliNB on spam/ham text.
-
-Hypothesis: MultinomialNB is the best fit for TF-IDF / bag-of-words text
-features. This script trains all three on the same split and checks that.
-"""
+"""Train three Naive Bayes variants, pick the best, then optimize with Random Forest."""
 
 from pathlib import Path
 
@@ -10,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.metrics import (
     accuracy_score,
@@ -17,65 +14,41 @@ from sklearn.metrics import (
     confusion_matrix,
     f1_score,
 )
-from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
+from sklearn.model_selection import (
+    RandomizedSearchCV,
+    StratifiedKFold,
+    cross_val_score,
+    train_test_split,
+)
 from sklearn.naive_bayes import BernoulliNB, GaussianNB, MultinomialNB
 from sklearn.pipeline import Pipeline
 
 DATA_PATH = Path(__file__).resolve().parent / "data.csv"
+CV = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+PREFERRED_NB = "MultinomialNB"
 
-# Fallback sample if data.csv is missing
-SAMPLE_DATA = {
-    "text": [
-        "Free entry in 2 a wkly comp to win FA Cup final tkts 21st May 2005.",
-        "Nah I don't think he goes to usf, he lives around here though",
-        "WINNER!! As a valued network customer you have been selected to receive a £900 prize!",
-        "Even my brother is not like to speak with me. They treat me like aids patent.",
-        "URGENT! You have won a 1 week FREE membership in our £100,000 Prize Jackpot!",
-        "I'm gonna be home soon and i don't want to talk about this stuff anymore.",
-        "Claim your free prize money today urgent offer",
-        "Can we reschedule our lunch meeting tomorrow",
-        "You have been selected to win a cash prize",
-        "Please review the attached project report",
-        "Limited time offer buy now cheap deal",
-        "Thanks for sending the meeting notes",
-        "Get rich quick with this secret method",
-        "Looking forward to seeing you on Friday",
-        "Your account has been compromised act now",
-        "The team standup starts at nine o'clock",
-    ],
-    "label": [
-        "spam",
-        "ham",
-        "spam",
-        "ham",
-        "spam",
-        "ham",
-        "spam",
-        "ham",
-        "spam",
-        "ham",
-        "spam",
-        "ham",
-        "spam",
-        "ham",
-        "spam",
-        "ham",
-    ],
-}
+
+class DenseTfidfVectorizer(TfidfVectorizer):
+    """TF-IDF that returns dense arrays for GaussianNB."""
+
+    def transform(self, raw_documents):
+        return super().transform(raw_documents).toarray()
+
+    def fit_transform(self, raw_documents, y=None):
+        return super().fit_transform(raw_documents, y).toarray()
 
 
 def load_dataframe() -> pd.DataFrame:
-    """Load data.csv when present; otherwise use the built-in sample."""
-    if DATA_PATH.exists():
-        df = pd.read_csv(DATA_PATH)
-        print(f"Loaded dataset from {DATA_PATH.name} ({len(df)} rows)")
-        return df
-    print("data.csv not found — using built-in sample dataset")
-    return pd.DataFrame(SAMPLE_DATA)
+    """Load data.csv when present."""
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(f"Dataset not found: {DATA_PATH}")
+    df = pd.read_csv(DATA_PATH)
+    print(f"Loaded dataset from {DATA_PATH.name} ({len(df)} rows)")
+    return df
 
 
 def evaluate_model(name, model, X_train, X_test, y_train, y_test, labels):
-    """Fit one Naive Bayes variant and return metrics + predictions."""
+    """Fit a model and print hold-out metrics."""
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
@@ -102,24 +75,9 @@ def evaluate_model(name, model, X_train, X_test, y_train, y_test, labels):
     }
 
 
-def cross_validate_models(texts: pd.Series, y: pd.Series) -> pd.DataFrame:
-    """Compare NB variants with features matched to each model's assumptions."""
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-    class DenseTfidfVectorizer(TfidfVectorizer):
-        """TF-IDF that returns dense arrays for GaussianNB."""
-
-        def transform(self, raw_documents):
-            return super().transform(raw_documents).toarray()
-
-        def fit_transform(self, raw_documents, y=None):
-            return super().fit_transform(raw_documents, y).toarray()
-
-    # Feature setup matched to each algorithm:
-    # - GaussianNB: continuous TF-IDF (dense)
-    # - MultinomialNB: term counts (classic text setup)
-    # - BernoulliNB: binary word presence/absence
-    candidates = {
+def nb_pipelines() -> dict[str, Pipeline]:
+    """Naive Bayes candidates with feature types matched to each algorithm."""
+    return {
         "GaussianNB": Pipeline(
             [
                 ("tfidf", DenseTfidfVectorizer(stop_words="english")),
@@ -140,18 +98,17 @@ def cross_validate_models(texts: pd.Series, y: pd.Series) -> pd.DataFrame:
         ),
     }
 
+
+def cross_validate_nb(texts: pd.Series, y: pd.Series) -> pd.DataFrame:
+    """Rank the three Naive Bayes implementations with stratified CV."""
     rows = []
-    print("\n===== Stratified 5-Fold Cross-Validation =====")
-    print(
-        "Features: GaussianNB=TF-IDF, MultinomialNB=counts, "
-        "BernoulliNB=binary presence"
-    )
-    for name, pipeline in candidates.items():
+    print("\n===== Naive Bayes: Stratified 5-Fold CV =====")
+    for name, pipeline in nb_pipelines().items():
         acc_scores = cross_val_score(
-            pipeline, texts, y, cv=cv, scoring="accuracy"
+            pipeline, texts, y, cv=CV, scoring="accuracy"
         )
         f1_scores = cross_val_score(
-            pipeline, texts, y, cv=cv, scoring="f1_weighted"
+            pipeline, texts, y, cv=CV, scoring="f1_weighted"
         )
         rows.append(
             {
@@ -166,10 +123,106 @@ def cross_validate_models(texts: pd.Series, y: pd.Series) -> pd.DataFrame:
             f"{name}: accuracy={acc_scores.mean():.2%} ± {acc_scores.std():.2%}, "
             f"weighted F1={f1_scores.mean():.2%} ± {f1_scores.std():.2%}"
         )
-
     return pd.DataFrame(rows).sort_values(
         ["cv_accuracy_mean", "cv_f1_mean"], ascending=False
     )
+
+
+def select_best_nb(cv_summary: pd.DataFrame) -> str:
+    """Pick the best NB; prefer MultinomialNB on ties (best fit for text counts)."""
+    best_score = cv_summary.iloc[0]["cv_accuracy_mean"]
+    tied = cv_summary.loc[
+        np.isclose(cv_summary["cv_accuracy_mean"], best_score), "model"
+    ].tolist()
+    if PREFERRED_NB in tied:
+        return PREFERRED_NB
+    return tied[0]
+
+
+def optimize_random_forest(texts: pd.Series, y: pd.Series) -> dict:
+    """Tune a Random Forest on TF-IDF features to try beating the best NB."""
+    print("\n===== Random Forest Optimization (RandomizedSearchCV) =====")
+
+    pipeline = Pipeline(
+        [
+            ("tfidf", TfidfVectorizer(stop_words="english", ngram_range=(1, 2))),
+            (
+                "clf",
+                RandomForestClassifier(
+                    random_state=42,
+                    class_weight="balanced",
+                    n_jobs=-1,
+                ),
+            ),
+        ]
+    )
+
+    param_distributions = {
+        "tfidf__min_df": [1, 2],
+        "tfidf__max_df": [0.9, 1.0],
+        "clf__n_estimators": [100, 200, 300],
+        "clf__max_depth": [None, 5, 10, 20],
+        "clf__min_samples_split": [2, 3, 5],
+        "clf__min_samples_leaf": [1, 2],
+        "clf__max_features": ["sqrt", "log2"],
+    }
+
+    search = RandomizedSearchCV(
+        pipeline,
+        param_distributions=param_distributions,
+        n_iter=20,
+        scoring="f1_weighted",
+        cv=CV,
+        random_state=42,
+        n_jobs=-1,
+        refit=True,
+    )
+    search.fit(texts, y)
+
+    acc_scores = cross_val_score(
+        search.best_estimator_, texts, y, cv=CV, scoring="accuracy"
+    )
+    f1_scores = cross_val_score(
+        search.best_estimator_, texts, y, cv=CV, scoring="f1_weighted"
+    )
+
+    print(f"Best RF params: {search.best_params_}")
+    print(
+        f"Tuned RandomForest: accuracy={acc_scores.mean():.2%} ± "
+        f"{acc_scores.std():.2%}, weighted F1={f1_scores.mean():.2%} ± "
+        f"{f1_scores.std():.2%}"
+    )
+
+    return {
+        "model_name": "RandomForest",
+        "estimator": search.best_estimator_,
+        "best_params": search.best_params_,
+        "cv_accuracy_mean": acc_scores.mean(),
+        "cv_accuracy_std": acc_scores.std(),
+        "cv_f1_mean": f1_scores.mean(),
+        "cv_f1_std": f1_scores.std(),
+    }
+
+
+def save_confusion_matrix(y_true, y_pred, labels, title, path):
+    """Save a seaborn heatmap of the confusion matrix."""
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    plt.figure(figsize=(5, 4))
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=labels,
+        yticklabels=labels,
+    )
+    plt.title(title)
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    plt.tight_layout()
+    plt.savefig(path, dpi=120)
+    plt.close()
+    print(f"Saved plot: {path}")
 
 
 def main() -> None:
@@ -178,12 +231,8 @@ def main() -> None:
     texts = df["text"]
     y = df["label"]
 
-    print("\nComparing GaussianNB vs MultinomialNB vs BernoulliNB")
-    print(
-        "Each model uses its natural feature type on the same train/test split."
-    )
+    print("\nStep 1 — Train GaussianNB, MultinomialNB, and BernoulliNB")
 
-    # Matched vectorizers for the hold-out comparison
     count_vec = CountVectorizer(stop_words="english")
     binary_vec = CountVectorizer(stop_words="english", binary=True)
     tfidf_vec = TfidfVectorizer(stop_words="english")
@@ -199,10 +248,10 @@ def main() -> None:
         stratify=y,
     )
     y_train, y_test = y.iloc[idx_train], y.iloc[idx_test]
-
+    texts_train, texts_test = texts.iloc[idx_train], texts.iloc[idx_test]
     print(f"Train / test sizes: {len(y_train)} / {len(y_test)}")
 
-    results = [
+    nb_holdout = [
         evaluate_model(
             "GaussianNB",
             GaussianNB(),
@@ -232,85 +281,113 @@ def main() -> None:
         ),
     ]
 
-    split_summary = pd.DataFrame(
-        [
-            {
-                "model": r["model_name"],
-                "holdout_accuracy": r["accuracy"],
-                "holdout_weighted_f1": r["f1"],
-            }
-            for r in results
-        ]
-    ).sort_values(
-        ["holdout_accuracy", "holdout_weighted_f1"], ascending=False
+    print("\n===== Hold-out Split Summary (Naive Bayes) =====")
+    print(
+        pd.DataFrame(
+            [
+                {
+                    "model": r["model_name"],
+                    "holdout_accuracy": r["accuracy"],
+                    "holdout_weighted_f1": r["f1"],
+                }
+                for r in nb_holdout
+            ]
+        )
+        .sort_values(
+            ["holdout_accuracy", "holdout_weighted_f1"], ascending=False
+        )
+        .to_string(index=False)
     )
 
-    print("\n===== Hold-out Split Summary =====")
-    print(split_summary.to_string(index=False))
-
-    cv_summary = cross_validate_models(texts, y)
-    print("\n===== Cross-Validation Ranking =====")
+    cv_summary = cross_validate_nb(texts, y)
+    print("\n===== Cross-Validation Ranking (Naive Bayes) =====")
     print(cv_summary.to_string(index=False))
 
-    best_cv = cv_summary.iloc[0]
-    chosen_name = "MultinomialNB"
-    chosen = next(r for r in results if r["model_name"] == chosen_name)
-    chosen_cv = cv_summary.loc[cv_summary["model"] == chosen_name].iloc[0]
-    best_score = best_cv["cv_accuracy_mean"]
-    tied_best = cv_summary.loc[
-        np.isclose(cv_summary["cv_accuracy_mean"], best_score), "model"
-    ].tolist()
-
-    print(f"\nBest by cross-validation: {', '.join(tied_best)}")
-    print(
-        f"Selected model for this project: {chosen_name} "
-        f"(CV accuracy={chosen_cv['cv_accuracy_mean']:.2%} ± "
-        f"{chosen_cv['cv_accuracy_std']:.2%})"
+    best_nb_name = select_best_nb(cv_summary)
+    best_nb_cv = cv_summary.loc[cv_summary["model"] == best_nb_name].iloc[0]
+    best_nb_holdout = next(
+        r for r in nb_holdout if r["model_name"] == best_nb_name
     )
 
-    if chosen_name in tied_best:
-        if len(tied_best) == 1:
-            print(
-                "Confirmation: MultinomialNB is the right choice for this "
-                "text classification task."
-            )
-        else:
-            print(
-                "Confirmation: MultinomialNB ties for best CV score and is "
-                "the right choice for count-based bag-of-words text "
-                f"(tied with {', '.join(m for m in tied_best if m != chosen_name)}). "
-                "BernoulliNB underperforms when term frequency matters."
-            )
+    print(f"\nStep 2 — Best Naive Bayes selected: {best_nb_name}")
+    print(
+        f"CV accuracy={best_nb_cv['cv_accuracy_mean']:.2%} ± "
+        f"{best_nb_cv['cv_accuracy_std']:.2%}"
+    )
+
+    # Step 3 — optimize with Random Forest
+    rf_result = optimize_random_forest(texts, y)
+    rf_holdout = evaluate_model(
+        "RandomForest (tuned)",
+        rf_result["estimator"],
+        texts_train,
+        texts_test,
+        y_train,
+        y_test,
+        labels,
+    )
+
+    comparison = pd.DataFrame(
+        [
+            {
+                "model": best_nb_name,
+                "cv_accuracy": best_nb_cv["cv_accuracy_mean"],
+                "cv_f1": best_nb_cv["cv_f1_mean"],
+                "holdout_accuracy": best_nb_holdout["accuracy"],
+                "holdout_f1": best_nb_holdout["f1"],
+            },
+            {
+                "model": "RandomForest",
+                "cv_accuracy": rf_result["cv_accuracy_mean"],
+                "cv_f1": rf_result["cv_f1_mean"],
+                "holdout_accuracy": rf_holdout["accuracy"],
+                "holdout_f1": rf_holdout["f1"],
+            },
+        ]
+    ).sort_values(["cv_accuracy", "cv_f1"], ascending=False)
+
+    print("\n===== Final Comparison: Best NB vs Tuned Random Forest =====")
+    print(comparison.to_string(index=False))
+
+    final_winner = comparison.iloc[0]["model"]
+    print(f"\nFinal optimized model: {final_winner}")
+    if final_winner == "RandomForest":
+        print(
+            "Random Forest improved on the best Naive Bayes result "
+            "after hyperparameter search."
+        )
+        final_model = rf_result["estimator"]
+        final_preds = rf_holdout["y_pred"]
     else:
         print(
-            f"On this dataset, {best_cv['model']} edged the CV ranking, "
-            "but MultinomialNB remains the preferred model for count-based "
-            "bag-of-words text features."
+            f"{best_nb_name} remains stronger than the tuned Random Forest "
+            "on this dataset (small text sample; NB often stays competitive)."
         )
+        final_model = best_nb_holdout["model"]
+        final_preds = best_nb_holdout["y_pred"]
 
-    cm = confusion_matrix(y_test, chosen["y_pred"], labels=labels)
-    plt.figure(figsize=(5, 4))
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt="d",
-        cmap="Blues",
-        xticklabels=labels,
-        yticklabels=labels,
+    save_confusion_matrix(
+        y_test,
+        final_preds,
+        labels,
+        f"Final model: {final_winner}",
+        "confusion_matrix.png",
     )
-    plt.title("Chosen model: MultinomialNB")
-    plt.xlabel("Predicted")
-    plt.ylabel("Actual")
-    plt.tight_layout()
-    plt.savefig("confusion_matrix.png", dpi=120)
-    print("\nSaved plot: confusion_matrix.png")
 
     demos = [
         "Congratulations! Claim your FREE prize now",
         "Are we still meeting for coffee later?",
     ]
-    demo_preds = chosen["model"].predict(count_vec.transform(demos))
-    print("\n--- Demo Predictions (MultinomialNB) ---")
+    if final_winner == "RandomForest":
+        demo_preds = final_model.predict(demos)
+    elif best_nb_name == "MultinomialNB":
+        demo_preds = final_model.predict(count_vec.transform(demos))
+    elif best_nb_name == "BernoulliNB":
+        demo_preds = final_model.predict(binary_vec.transform(demos))
+    else:
+        demo_preds = final_model.predict(tfidf_vec.transform(demos).toarray())
+
+    print(f"\n--- Demo Predictions ({final_winner}) ---")
     for text, label in zip(demos, demo_preds):
         print(f"[{label}] {text}")
 
