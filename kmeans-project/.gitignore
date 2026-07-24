@@ -1,0 +1,8 @@
+__pycache__
+.env
+.learn
+venv/
+figures/
+*.joblib
+*.pkl
+.DS_Store
