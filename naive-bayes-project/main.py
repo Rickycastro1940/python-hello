@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -24,6 +25,8 @@ from sklearn.naive_bayes import BernoulliNB, GaussianNB, MultinomialNB
 from sklearn.pipeline import Pipeline
 
 DATA_PATH = Path(__file__).resolve().parent / "data.csv"
+MODELS_DIR = Path(__file__).resolve().parent / "models"
+MODEL_PATH = MODELS_DIR / "spam_classifier.joblib"
 CV = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 PREFERRED_NB = "MultinomialNB"
 
@@ -225,6 +228,48 @@ def save_confusion_matrix(y_true, y_pred, labels, title, path):
     print(f"Saved plot: {path}")
 
 
+def build_final_pipeline(model_name: str, estimator) -> Pipeline:
+    """Wrap the winning model as a text→prediction pipeline for persistence."""
+    if model_name == "RandomForest":
+        # Already a full Pipeline (TfidfVectorizer + RandomForestClassifier).
+        return estimator
+    if model_name == "MultinomialNB":
+        return Pipeline(
+            [
+                ("counts", CountVectorizer(stop_words="english")),
+                ("clf", MultinomialNB()),
+            ]
+        )
+    if model_name == "BernoulliNB":
+        return Pipeline(
+            [
+                ("binary", CountVectorizer(stop_words="english", binary=True)),
+                ("clf", BernoulliNB()),
+            ]
+        )
+    if model_name == "GaussianNB":
+        return Pipeline(
+            [
+                ("tfidf", DenseTfidfVectorizer(stop_words="english")),
+                ("clf", GaussianNB()),
+            ]
+        )
+    raise ValueError(f"Unknown model name: {model_name}")
+
+
+def save_model(pipeline: Pipeline, model_name: str, metrics: dict) -> Path:
+    """Persist the fitted pipeline and metadata under models/."""
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "model_name": model_name,
+        "pipeline": pipeline,
+        "metrics": metrics,
+    }
+    joblib.dump(payload, MODEL_PATH)
+    print(f"\nSaved model to {MODEL_PATH}")
+    return MODEL_PATH
+
+
 def main() -> None:
     df = load_dataframe()
     labels = sorted(df["label"].unique())
@@ -356,15 +401,36 @@ def main() -> None:
             "Random Forest improved on the best Naive Bayes result "
             "after hyperparameter search."
         )
-        final_model = rf_result["estimator"]
         final_preds = rf_holdout["y_pred"]
+        saved_estimator = rf_result["estimator"]
+        winner_metrics = {
+            "cv_accuracy": float(rf_result["cv_accuracy_mean"]),
+            "cv_f1": float(rf_result["cv_f1_mean"]),
+            "holdout_accuracy": float(rf_holdout["accuracy"]),
+            "holdout_f1": float(rf_holdout["f1"]),
+        }
     else:
         print(
             f"{best_nb_name} remains stronger than the tuned Random Forest "
             "on this dataset (small text sample; NB often stays competitive)."
         )
-        final_model = best_nb_holdout["model"]
         final_preds = best_nb_holdout["y_pred"]
+        saved_estimator = best_nb_holdout["model"]
+        winner_metrics = {
+            "cv_accuracy": float(best_nb_cv["cv_accuracy_mean"]),
+            "cv_f1": float(best_nb_cv["cv_f1_mean"]),
+            "holdout_accuracy": float(best_nb_holdout["accuracy"]),
+            "holdout_f1": float(best_nb_holdout["f1"]),
+        }
+
+    # Refit a deployable text pipeline on the full dataset, then store it.
+    final_pipeline = build_final_pipeline(final_winner, saved_estimator)
+    if final_winner != "RandomForest":
+        final_pipeline.fit(texts, y)
+    else:
+        final_pipeline = saved_estimator
+
+    save_model(final_pipeline, final_winner, winner_metrics)
 
     save_confusion_matrix(
         y_test,
@@ -378,16 +444,10 @@ def main() -> None:
         "Congratulations! Claim your FREE prize now",
         "Are we still meeting for coffee later?",
     ]
-    if final_winner == "RandomForest":
-        demo_preds = final_model.predict(demos)
-    elif best_nb_name == "MultinomialNB":
-        demo_preds = final_model.predict(count_vec.transform(demos))
-    elif best_nb_name == "BernoulliNB":
-        demo_preds = final_model.predict(binary_vec.transform(demos))
-    else:
-        demo_preds = final_model.predict(tfidf_vec.transform(demos).toarray())
+    loaded = joblib.load(MODEL_PATH)
+    demo_preds = loaded["pipeline"].predict(demos)
 
-    print(f"\n--- Demo Predictions ({final_winner}) ---")
+    print(f"\n--- Demo Predictions from saved model ({loaded['model_name']}) ---")
     for text, label in zip(demos, demo_preds):
         print(f"[{label}] {text}")
 
