@@ -1,7 +1,9 @@
-"""Dogs vs Cats image classification — Steps 2–3.
+"""Dogs vs Cats image classification — Steps 2–5.
 
 Step 2: visualize samples and prepare 224x224 train/test generators.
-Step 3: finish the VGG16-style ANN (dense head), compile, train, measure.
+Step 3: build the VGG16-style ANN and compile it.
+Step 4: optimize with ModelCheckpoint + EarlyStopping; predict on test.
+Step 5: persist the best model under models/.
 """
 
 from __future__ import annotations
@@ -12,10 +14,16 @@ import shutil
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from tensorflow.keras.layers import Conv2D, Dense, Flatten, MaxPool2D
-from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.preprocessing.image import ImageDataGenerator, load_img
+from tensorflow.keras.preprocessing.image import (
+    ImageDataGenerator,
+    img_to_array,
+    load_img,
+)
 
 # Paths
 ROOT = Path(__file__).resolve().parent
@@ -24,17 +32,21 @@ PROCESSED = ROOT / "data" / "processed"
 FIGURES = ROOT / "figures"
 MODELS_DIR = ROOT / "models"
 HISTORY_PNG = FIGURES / "training_history.png"
+PREDICTIONS_PNG = FIGURES / "test_predictions.png"
+# Tutorial/solution checkpoint name (Keras 3 native format)
+CHECKPOINT_PATH = MODELS_DIR / "vgg16_1.keras"
 
 # VGG-style input size from the tutorial architecture
 IMG_SIZE = (224, 224)
 TEST_FRACTION = 0.20
 RANDOM_SEED = 42
 BATCH_SIZE = 16
-# Solution uses a short Step-3 fit; keep step caps so CPU runs finish
+# Match the tutorial solution fit() settings
 EPOCHS = 3
 STEPS_PER_EPOCH = 100
-VALIDATION_STEPS = 25
-LEARNING_RATE = 0.001  # matches tutorial solution Adam(learning_rate=0.001)
+VALIDATION_STEPS = 10
+LEARNING_RATE = 0.001
+EARLY_STOP_PATIENCE = 3
 
 
 def list_labeled_images(train_dir: Path) -> tuple[list[Path], list[Path]]:
@@ -145,14 +157,9 @@ def make_generators(train_dir: Path, test_dir: Path):
 
 
 def build_vgg16_like_model() -> Sequential:
-    """Build the VGG16-style CNN from the tutorial (Step 3).
-
-    Convolutions extract spatial features; the dense head turns them into
-    class probabilities for cat vs dog.
-    """
+    """Build the VGG16-style CNN from the tutorial (Step 3)."""
     model = Sequential()
 
-    # --- Convolutional feature extractor ---
     model.add(
         Conv2D(
             input_shape=(224, 224, 3),
@@ -180,7 +187,6 @@ def build_vgg16_like_model() -> Sequential:
     model.add(Conv2D(filters=512, kernel_size=(3, 3), padding="same", activation="relu"))
     model.add(MaxPool2D(pool_size=(2, 2), strides=(2, 2)))
 
-    # --- Remaining elements: dense head for classification ---
     model.add(Flatten())
     model.add(Dense(units=4096, activation="relu"))
     model.add(Dense(units=4096, activation="relu"))
@@ -198,39 +204,58 @@ def compile_model(model: Sequential) -> Sequential:
     return model
 
 
-def train_and_measure(model: Sequential, trdata, tsdata):
-    """Train the network and report test-set performance."""
-    print(
-        f"Training for {EPOCHS} epoch(s) "
-        f"(steps_per_epoch={STEPS_PER_EPOCH}, validation_steps={VALIDATION_STEPS})..."
+def make_callbacks(checkpoint_path: Path) -> list:
+    """Create ModelCheckpoint + EarlyStopping (tutorial Step 4)."""
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint = ModelCheckpoint(
+        filepath=str(checkpoint_path),
+        monitor="val_accuracy",
+        verbose=1,
+        save_best_only=True,
+        save_weights_only=False,
+        mode="auto",
     )
+    early = EarlyStopping(
+        monitor="val_accuracy",
+        patience=EARLY_STOP_PATIENCE,
+        verbose=1,
+        mode="auto",
+        restore_best_weights=False,
+    )
+    return [checkpoint, early]
+
+
+def optimize_with_callbacks(model: Sequential, trdata, tsdata, checkpoint_path: Path):
+    """Train with checkpoint/early-stopping callbacks (fit replaces fit_generator)."""
+    callbacks = make_callbacks(checkpoint_path)
+    print(
+        f"Step 4 training: epochs={EPOCHS}, "
+        f"steps_per_epoch={STEPS_PER_EPOCH}, validation_steps={VALIDATION_STEPS}"
+    )
+    # Modern Keras: model.fit(...) — fit_generator() was removed.
     history = model.fit(
         trdata,
         steps_per_epoch=STEPS_PER_EPOCH,
         validation_data=tsdata,
         validation_steps=VALIDATION_STEPS,
         epochs=EPOCHS,
+        callbacks=callbacks,
         verbose=1,
     )
-
-    print("\n=== Measure performance on the test generator ===")
-    test_loss, test_acc = model.evaluate(tsdata, verbose=1)
-    print(f"Test loss: {test_loss:.4f}")
-    print(f"Test accuracy: {test_acc:.2%}")
-    return history, test_loss, test_acc
+    return history
 
 
 def plot_history(history, out_path: Path) -> None:
     """Plot training/validation accuracy and loss."""
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    axes[0].plot(history.history["accuracy"], label="train")
-    axes[0].plot(history.history["val_accuracy"], label="val")
+    axes[0].plot(history.history.get("accuracy", []), label="train")
+    axes[0].plot(history.history.get("val_accuracy", []), label="val")
     axes[0].set_title("Accuracy")
     axes[0].set_xlabel("Epoch")
     axes[0].legend()
 
-    axes[1].plot(history.history["loss"], label="train")
-    axes[1].plot(history.history["val_loss"], label="val")
+    axes[1].plot(history.history.get("loss", []), label="train")
+    axes[1].plot(history.history.get("val_loss", []), label="val")
     axes[1].set_title("Loss")
     axes[1].set_xlabel("Epoch")
     axes[1].legend()
@@ -240,6 +265,60 @@ def plot_history(history, out_path: Path) -> None:
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
     print(f"Saved figure: {out_path}")
+
+
+def index_to_label(class_indices: dict, index: int) -> str:
+    """Map softmax argmax index back to class name."""
+    inv = {v: k for k, v in class_indices.items()}
+    return inv[index]
+
+
+def predict_on_test_set(model, tsdata, out_path: Path, n_show: int = 9) -> float:
+    """Load-time predictions on the test generator; save a sample grid."""
+    print("\n=== Step 4: Predictions on the test set ===")
+    probs = model.predict(tsdata, verbose=1)
+    pred_idx = np.argmax(probs, axis=1)
+    true_idx = tsdata.classes
+    accuracy = float(np.mean(pred_idx == true_idx))
+    print(f"Test-set prediction accuracy: {accuracy:.2%}")
+
+    # Sample grid: first n_show images from the generator filenames
+    filepaths = list(tsdata.filepaths)
+    n_show = min(n_show, len(filepaths))
+    fig, axes = plt.subplots(3, 3, figsize=(9, 9))
+    fig.suptitle("Best-model predictions on test images", fontsize=14)
+    for ax, i in zip(axes.ravel(), range(n_show)):
+        path = filepaths[i]
+        img = load_img(path, target_size=IMG_SIZE)
+        true_name = index_to_label(tsdata.class_indices, int(true_idx[i]))
+        pred_name = index_to_label(tsdata.class_indices, int(pred_idx[i]))
+        conf = float(np.max(probs[i]))
+        ax.imshow(img)
+        ax.set_title(f"true={true_name}\npred={pred_name} ({conf:.2f})", fontsize=9)
+        ax.axis("off")
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+    print(f"Saved figure: {out_path}")
+    return accuracy
+
+
+def predict_single_image(model, image_path: Path, class_indices: dict) -> str:
+    """Predict one image the way the tutorial solution does."""
+    img = load_img(image_path, target_size=IMG_SIZE)
+    arr = img_to_array(img) / 255.0
+    arr = np.expand_dims(arr, axis=0)
+    output = model.predict(arr, verbose=0)
+    # class_indices is alphabetical with flow_from_directory: {'cat': 0, 'dog': 1}
+    cat_i = class_indices["cat"]
+    dog_i = class_indices["dog"]
+    label = "cat" if output[0][cat_i] > output[0][dog_i] else "dog"
+    print(
+        f"Single-image prediction for {image_path.name}: {label} "
+        f"(cat={output[0][cat_i]:.4f}, dog={output[0][dog_i]:.4f})"
+    )
+    return label
 
 
 def prepare_data_if_needed() -> tuple:
@@ -273,22 +352,36 @@ def main() -> None:
     batch_x, batch_y = next(iter(trdata))
     print(f"trdata batch: X={batch_x.shape}, y={batch_y.shape}")
 
-    print("\n=== Step 3: Build ANN, train, measure performance ===")
+    print("\n=== Step 3: Build and compile the VGG16-style ANN ===")
     model = build_vgg16_like_model()
     compile_model(model)
     model.summary()
 
-    history, test_loss, test_acc = train_and_measure(model, trdata, tsdata)
+    print("\n=== Step 4: Optimize with ModelCheckpoint + EarlyStopping ===")
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    history = optimize_with_callbacks(model, trdata, tsdata, CHECKPOINT_PATH)
     plot_history(history, HISTORY_PNG)
 
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    weights_path = MODELS_DIR / "vgg16_dogs_cats.keras"
-    model.save(weights_path)
-    print(f"Saved model to {weights_path}")
-    print(
-        f"Step 3 complete — measured test accuracy: {test_acc:.2%} "
-        f"(loss={test_loss:.4f})"
-    )
+    if not CHECKPOINT_PATH.exists():
+        # Fallback if val_accuracy never improved enough to write a checkpoint
+        model.save(CHECKPOINT_PATH)
+        print(f"No checkpoint file yet — saved final weights to {CHECKPOINT_PATH}")
+
+    print(f"\nLoading best model from {CHECKPOINT_PATH}")
+    best_model = load_model(CHECKPOINT_PATH)
+
+    test_loss, test_acc = best_model.evaluate(tsdata, verbose=1)
+    print(f"Best-model test loss: {test_loss:.4f}")
+    print(f"Best-model test accuracy: {test_acc:.2%}")
+
+    predict_on_test_set(best_model, tsdata, PREDICTIONS_PNG)
+
+    # One concrete example image (first test file), like the solution notebook
+    sample_path = Path(tsdata.filepaths[0])
+    predict_single_image(best_model, sample_path, tsdata.class_indices)
+
+    print("\n=== Step 5: Model saved ===")
+    print(f"Best model stored at: {CHECKPOINT_PATH}")
 
 
 if __name__ == "__main__":

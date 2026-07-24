@@ -6,7 +6,9 @@
 
 1. **Step 1** — Download/unzip `dogs-vs-cats` under `data/raw/` (see commands below).
 2. **Step 2** — Preview first 9 dogs/cats; build train/test class folders; `ImageDataGenerator` pipelines at **224×224** (VGG input).
-3. **Step 3** — Build the tutorial **VGG16-style** `Sequential` CNN, compile, train, evaluate, plot history, save model.
+3. **Step 3** — Build the tutorial **VGG16-style** `Sequential` CNN and compile with Adam.
+4. **Step 4** — Optimize with `ModelCheckpoint` + `EarlyStopping`, reload the best weights, predict on the test set.
+5. **Step 5** — Persist the best model under `models/vgg16_1.keras`.
 
 ## Architecture (Step 3)
 
