@@ -12,12 +12,12 @@ Classify California Housing block groups by **region** (`Latitude`, `Longitude`)
 | Step | Status | Description |
 |------|--------|-------------|
 | 1 | Done | Load `housing.csv`, keep 3 features, train/test split |
-| 2 | Next | Fit K-Means (`n_clusters=6`), add `cluster`, plot |
-| 3 | Pending | Predict clusters for the test set and overlay on the plot |
-| 4 | Pending | Train a supervised classifier on cluster labels |
-| 5 | Pending | Save both models under `models/` |
+| 2 | Done | Fit K-Means (`n_clusters=6`), add `cluster`, plot |
+| 3 | Done | Predict clusters for the test set and overlay on the plot |
+| 4 | Done | Train Decision Tree on cluster labels |
+| 5 | Done | Save both models under `models/` |
 
-## Run Step 1
+## Run
 
 ```bash
 python -m venv venv
@@ -26,7 +26,14 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Dataset path: `data/raw/housing.csv`  
-(or auto-download from the tutorial URL if missing)
+## Outputs
 
-Processed splits: `data/processed/housing_train.csv`, `housing_test.csv`
+| Path | Description |
+|------|-------------|
+| `data/raw/housing.csv` | Source dataset |
+| `data/processed/housing_*_clustered.csv` | Labeled train/test |
+| `figures/kmeans_train_clusters.png` | Step 2 clusters |
+| `figures/kmeans_test_overlay.png` | Step 3 test overlay |
+| `figures/decision_tree.png` | Step 4 tree view |
+| `models/k-means_default_42.sav` | Unsupervised model |
+| `models/decision_tree_classifier_default_42.sav` | Supervised model |
