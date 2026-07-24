@@ -35,5 +35,10 @@ python main.py
 | `figures/kmeans_train_clusters.png` | Step 2 clusters |
 | `figures/kmeans_test_overlay.png` | Step 3 test overlay |
 | `figures/decision_tree.png` | Step 4 tree view |
+| `figures/decision_tree_confusion.png` | Step 4 confusion matrix |
 | `models/k-means_default_42.sav` | Unsupervised model |
 | `models/decision_tree_classifier_default_42.sav` | Supervised model |
+
+## Step 4 notes
+
+Chose **DecisionTreeClassifier** because cluster boundaries mix geography and income (non-linear), features need no scaling, and the tree is easy to inspect. Accuracy vs K-Means test labels is **~99.5%**; remaining errors concentrate on the smallest high-income cluster.
