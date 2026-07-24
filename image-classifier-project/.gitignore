@@ -1,0 +1,12 @@
+__pycache__
+.env
+.learn
+venv/
+data/raw/dogs-vs-cats/
+data/raw/*.zip
+data/processed/
+figures/
+*.jpg
+*.npz
+*.h5
+*.keras
