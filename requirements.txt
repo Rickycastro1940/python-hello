@@ -19,3 +19,11 @@ regex==2026.7.19
 requests==2.34.2
 pyyaml==6.0.3
 packaging==26.2
+
+# Brasaland sales forecasting (src/app.py)
+scikit-learn==1.9.0
+matplotlib==3.11.1
+scipy==1.18.0
+
+# Testing
+pytest==9.1.1
