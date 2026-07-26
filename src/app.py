@@ -26,8 +26,38 @@ from sklearn.metrics import mean_squared_error  # noqa: E402
 
 # Resolve paths relative to this file so the script runs from any working dir.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_PATH = PROJECT_ROOT / "data" / "raw" / "brasaland_sales.csv"
+
+# The historical sales dataset is *provided*, never generated/simulated. It
+# lives under one of the two canonical locations (checked in this order):
+#   - reference repository: content/contexts/sales-forecasting/<company>/<company>_sales.csv
+#   - monorepo:             data/raw/<company>_sales.csv
+COMPANY = "brasaland"
+DATASET_CANDIDATES = (
+    PROJECT_ROOT
+    / "content"
+    / "contexts"
+    / "sales-forecasting"
+    / COMPANY
+    / f"{COMPANY}_sales.csv",
+    PROJECT_ROOT / "data" / "raw" / f"{COMPANY}_sales.csv",
+)
 FIGURE_PATH = PROJECT_ROOT / "reports" / "sales_forecast_variability.png"
+
+
+def resolve_dataset_path() -> Path:
+    """Return the first existing provided-dataset path, or raise if missing.
+
+    We never fall back to generated/simulated data — if the provided dataset is
+    absent, the caller must supply the real file at one of the canonical paths.
+    """
+    for candidate in DATASET_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    searched = "\n  - ".join(str(c) for c in DATASET_CANDIDATES)
+    raise FileNotFoundError(
+        "Provided historical sales dataset not found. Add the real file "
+        "(do not generate or simulate it) at one of:\n  - " + searched
+    )
 
 FEATURES = ["year", "month_num", "covers_served", "avg_ticket_usd"]
 TARGET = "revenue_usd"
@@ -39,8 +69,10 @@ TEST_START_YEAR = 2024  # 2 most recent years: 2024-2025
 # ==========================================
 # 1. DATA PREPARATION & SPLIT
 # ==========================================
-def load_and_prepare_data(path: Path = DATA_PATH) -> pd.DataFrame:
+def load_and_prepare_data(path: Path | None = None) -> pd.DataFrame:
     """Load the raw dataset and engineer the time features used for regression."""
+    if path is None:
+        path = resolve_dataset_path()
     df = pd.read_csv(path)
 
     # Handle empty values (if any).
