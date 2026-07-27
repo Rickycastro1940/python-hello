@@ -21,6 +21,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 KB_DIR = PROJECT_ROOT / "docs" / "company-knowledge-base"
 QDRANT_PATH = PROJECT_ROOT / "data" / "qdrant_storage"
 
+# Load .env (QDRANT_URL, model IDs, optional API keys/base URLs) so config is
+# picked up without manually exporting env vars. Optional dependency.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env")
+except ImportError:
+    pass
+
 # --- Company-specific config (from CONTEXT-brasaland.en.md) ---
 COMPANY = "brasaland"
 LANGUAGE = "en"

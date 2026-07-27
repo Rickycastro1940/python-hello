@@ -10,3 +10,6 @@ todos.csv
 
 # RAG local Qdrant storage
 data/qdrant_storage/
+
+# Local env config (secrets / hosts)
+.env
