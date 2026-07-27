@@ -176,3 +176,22 @@ extrapolable (corrective action 1), then add light, CV-tuned regularization
 (action 2), and re-run this exact evaluation (`uv run python src/evaluate_model.py`)
 to confirm both the val/train gap and the validation RMSE improve before
 promotion to staging.
+
+---
+
+## 7. Corrective action 1 — implemented & validated
+
+The primary corrective action (make the target extrapolable) is implemented in
+`src/improved_model.py` as a **`TrendResidualRegressor`**: a linear trend on time
+(which extrapolates the growth) plus the Random Forest fit on the **residual**
+(the now-stationary seasonality). Run: `uv run python src/improved_model.py`.
+
+| Model | CV val RMSE | Test RMSE | Test MAPE | December MAPE |
+|---|---|---|---|---|
+| Baseline RF | 33,688 ± 6,984 | 46,550 | 4.02% | 12.65% |
+| **Trend + RF residual** | 31,746 ± 10,071 | **26,508** | **2.69%** | **5.24%** |
+
+Removing the trend cuts test-set RMSE by ~**43%** and more than halves the
+December peak error (12.65% → 5.24%), confirming the diagnosis: the dominant
+error was trend-extrapolation bias, and detrending — not more data or more
+complexity — is the fix.
