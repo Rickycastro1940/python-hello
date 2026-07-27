@@ -77,6 +77,13 @@ Two different models (never the same for both jobs):
 - **Idempotency:** `setup()` recreates the collection and uses deterministic
   UUIDv5 point IDs (`company:source_document:chunk_index`), so re-running never
   duplicates points.
+- **Qdrant deployment:** runs as a service in `docker-compose.yml`
+  (`qdrant/qdrant`, REST 6333 / gRPC 6334). The client reads `QDRANT_URL`
+  (server mode) with an embedded on-disk fallback (`data/qdrant_storage/`) when
+  unset. Verified: `docker compose up -d` -> collection `status: green`,
+  `points_count: 18`, `dim: 384`, `distance: Cosine`; Recall@3 = 100% against
+  the server. Model IDs and `QDRANT_URL` are configurable via `.env`
+  (`.env.example`).
 
 ## 5. Guardrails (CONTEXT section 4 & 6)
 

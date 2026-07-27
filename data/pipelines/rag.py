@@ -15,6 +15,8 @@ LangGraph agent can reuse each step independently.
 
 from __future__ import annotations
 
+import os
+
 from data.process import rag as kb
 
 # Minimum cosine similarity a chunk must reach to be used as context.
@@ -23,7 +25,7 @@ from data.process import rag as kb
 DEFAULT_MIN_SCORE = 0.40
 
 # Dedicated GENERATION model — different from the embeddings model in kb.embed().
-GENERATION_MODEL = "google/flan-t5-base"
+GENERATION_MODEL = os.environ.get("GENERATION_MODEL", "google/flan-t5-base")
 _generator = None
 
 NO_CONTEXT_ANSWER = (

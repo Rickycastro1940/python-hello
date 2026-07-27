@@ -13,6 +13,7 @@ collection name, payload field names, and the four source documents.
 
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 
@@ -26,7 +27,9 @@ LANGUAGE = "en"
 COLLECTION = "brasaland_knowledge_base"
 
 # Dedicated embeddings model (NOT the generation model used in query()).
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL = os.environ.get(
+    "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+)
 VECTOR_DIM = 384  # all-MiniLM-L6-v2 output dimension
 
 _embedder = None  # lazy singleton so importing the module stays cheap
@@ -55,13 +58,22 @@ def embed(text: str) -> list[float]:
 
 
 def _get_client():
-    """Return a lazily-opened Qdrant client in local/on-disk mode (no server)."""
+    """Return a lazily-opened Qdrant client.
+
+    Uses the server at ``QDRANT_URL`` (the docker-compose Qdrant service) when
+    set; otherwise falls back to embedded on-disk mode at ``data/qdrant_storage``
+    so the pipeline still runs with no server.
+    """
     global _client
     if _client is None:
         from qdrant_client import QdrantClient
 
-        QDRANT_PATH.mkdir(parents=True, exist_ok=True)
-        _client = QdrantClient(path=str(QDRANT_PATH))
+        url = os.environ.get("QDRANT_URL")
+        if url:
+            _client = QdrantClient(url=url)
+        else:
+            QDRANT_PATH.mkdir(parents=True, exist_ok=True)
+            _client = QdrantClient(path=str(QDRANT_PATH))
     return _client
 
 
