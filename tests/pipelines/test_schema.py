@@ -35,6 +35,14 @@ def test_dataset_columns_match_context():
     assert set(df["market"].unique()).issubset(CONTEXT_MARKETS)
 
     # CONTEXT guarantees 120 consolidated monthly rows (2016-01 .. 2025-12).
-    consolidated = df[df["market"] == "consolidated"]
+    consolidated = df[df["market"] == "consolidated"].copy()
     assert len(consolidated) == 120
-    assert (consolidated["revenue_usd"] > 0).all()
+
+    # CONTEXT §5 business constraints.
+    assert (consolidated["revenue_usd"] > 0).all()  # all revenue positive
+
+    months = pd.to_datetime(consolidated["month"]).sort_values()
+    assert (months.dt.day == 1).all()  # month is the first day of the month
+    # No missing months across the full 2016-01 .. 2025-12 range.
+    expected = pd.date_range("2016-01-01", "2025-12-01", freq="MS")
+    assert list(months.to_numpy()) == list(expected.to_numpy())

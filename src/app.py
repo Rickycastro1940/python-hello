@@ -77,6 +77,10 @@ TARGET = "revenue_usd"
 TRAIN_END_YEAR = 2023  # strict 8-year training window: 2016-2023
 TEST_START_YEAR = 2024  # 2 most recent years: 2024-2025
 
+# PSI interpretation thresholds (CONTEXT wants a high PSI called out explicitly).
+PSI_MODERATE = 0.10  # < 0.10 => stable
+PSI_SIGNIFICANT = 0.25  # >= 0.25 => significant shift, retrain
+
 
 # ==========================================
 # 1. DATA PREPARATION & SPLIT
@@ -460,6 +464,18 @@ def main() -> None:
         f"(RMSE: {results['rmse']:,.2f} USD  |  MAPE: {results['mape']:.2f}%)"
     )
     print(f"PSI:  {results['psi']:.4f}")
+    # CONTEXT §3: explicitly call out a high PSI (structural drift => retrain).
+    if results["psi"] >= PSI_SIGNIFICANT:
+        print(
+            f"  [DRIFT] PSI >= {PSI_SIGNIFICANT}: significant shift between the "
+            "training and test distributions — sales behavior changed "
+            "structurally (e.g. growth/new locations). The model should be "
+            "retrained before relying on it for planning."
+        )
+    elif results["psi"] >= PSI_MODERATE:
+        print(f"  [WATCH] PSI >= {PSI_MODERATE}: moderate shift — monitor.")
+    else:
+        print(f"  [OK] PSI < {PSI_MODERATE}: distribution is stable.")
     print(f"Gini: {results['gini']:.4f}")
     print(f"K2 Score (Kendall Tau proxy): {results['k2_tau']:.4f}")
 
