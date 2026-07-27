@@ -20,11 +20,13 @@ Make sure you have Python installed in your computer. We strongly recommend [ins
 
 ## Model Choice: Random Forest (scikit-learn)
 
-The sales forecaster (`src/app.py`) trains a scikit-learn `RandomForestRegressor`. We chose Random Forest over XGBoost because:
+The sales forecaster (`src/app.py`) trains a scikit-learn `RandomForestRegressor`. We chose Random Forest over XGBoost against three criteria:
 
-* **Prediction-variability band.** Random Forest's independent trees let us derive a 90% prediction interval directly from the per-tree spread — this is a required deliverable. XGBoost's sequential/additive trees don't provide that per-tree spread out of the box.
-* **Explainability for Finance.** Bagged independent trees plus `feature_importances_` are easy to explain to business stakeholders; boosting behaves more like a black box.
-* **Fits the data.** On this small, low-noise dataset (120 monthly rows) Random Forest is robust with almost no tuning, whereas XGBoost's advantage appears mainly on larger, noisier datasets and needs careful regularization to avoid overfitting.
+* **Data size.** Small, low-noise dataset (120 monthly rows). Random Forest is robust and generalizes well at this size; XGBoost's edge appears mainly on larger, noisier data and overfits small data without heavy regularization.
+* **Need for explainability.** This is a Finance RFI — bagged independent trees plus `feature_importances_` are easy to explain to stakeholders, whereas boosting behaves more like a black box.
+* **Time available for tuning.** Little to none. Random Forest performs well with near-default hyper-parameters; XGBoost needs careful tuning (learning rate, depth, regularization, early stopping) to be worthwhile.
+
+Bonus: Random Forest's independent trees also give the required 90% prediction-variability band directly from the per-tree spread, which XGBoost's additive trees don't provide out of the box.
 
 ## Metric Explanations for the Finance Team
 * **MSE (Mean Squared Error):** Measures the average squared difference between our forecasted revenue and the actual revenue. *Why low MSE isn't enough:* It heavily penalizes large outliers but doesn't tell us if our model's underlying distribution of predictions remains stable over time or if it's biased in one direction.

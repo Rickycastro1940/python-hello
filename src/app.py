@@ -144,19 +144,25 @@ def split_data(df: pd.DataFrame):
 # 2. MODEL TRAINING & JUSTIFICATION
 # ==========================================
 """
-MODEL CHOICE — Random Forest (scikit-learn `RandomForestRegressor`) over XGBoost:
+MODEL CHOICE — Random Forest (scikit-learn `RandomForestRegressor`) over XGBoost.
 
-1. Prediction-variability band (a CONTEXT deliverable): Random Forest is an
-   ensemble of *independent* trees, so we can read a prediction interval
-   straight from the spread of per-tree predictions (see `plot_forecast`).
-   XGBoost's trees are sequential/additive and don't give this per-tree spread
-   for free.
-2. Explainability for Finance: bagged independent trees + `feature_importances_`
-   are straightforward to explain to Mariana/Felipe; XGBoost's boosted residual
-   fitting behaves more like a black box.
-3. Small, low-noise dataset (120 monthly rows): Random Forest is robust and
-   needs almost no tuning here, whereas XGBoost's edge shows mostly on larger,
-   noisier data and would need careful regularization to avoid overfitting.
+Decision criteria used to pick the algorithm:
+
+- DATA SIZE: the dataset is small and low-noise (120 monthly `consolidated`
+  rows; 96 train / 24 test). Random Forest is robust and generalizes well at
+  this size; XGBoost's accuracy edge typically appears on much larger, noisier
+  datasets and it is easier to overfit small data without heavy regularization.
+- NEED FOR EXPLAINABILITY: this is a Finance RFI, so stakeholders (Mariana,
+  Felipe) must be able to trust and follow the model. Bagging independent trees
+  and reading `feature_importances_` is easy to explain; XGBoost's sequential
+  residual boosting behaves more like a black box.
+- TIME AVAILABLE FOR TUNING: little/none. Random Forest gives strong results
+  with essentially default hyper-parameters, while XGBoost needs careful tuning
+  (learning rate, depth, regularization, early stopping) to be worthwhile.
+
+Bonus (a CONTEXT deliverable): Random Forest's *independent* trees let us read a
+prediction-variability band straight from the per-tree spread (see
+`plot_forecast`); XGBoost's additive trees don't provide that for free.
 """
 
 
