@@ -213,6 +213,18 @@ def feature_importances(model, feature_names=None) -> dict:
 # ==========================================
 # 3. EVALUATION METRICS
 # ==========================================
+# What each metric measures, and why a low MSE alone is not enough (see README
+# "Why a low MSE alone isn't enough" for the Finance-facing version):
+#   - MSE  : average squared error magnitude (report RMSE/MAPE for readability).
+#            Blind to bias, distribution drift, ranking quality and direction.
+#   - PSI  : distribution shift of predictions vs the training target -> catches
+#            drift/bias that a low MSE would hide (high PSI => retrain).
+#   - Gini : ranking power (can the model separate strong vs weak months?) ->
+#            two models with equal MSE can rank very differently.
+#   - K2   : Kendall-tau dependency -> confirms predictions move in the same
+#            direction as actuals, not just close on average.
+# A low MSE only says "close on average"; PSI + Gini + K2 confirm the model is
+# stable, unbiased and directionally trustworthy for planning.
 def calculate_psi(expected, actual, buckets: int = 10) -> float:
     """Population Stability Index between an expected and actual distribution."""
     expected = np.asarray(expected)
