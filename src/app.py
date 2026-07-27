@@ -59,6 +59,17 @@ def resolve_dataset_path() -> Path:
         "(do not generate or simulate it) at one of:\n  - " + searched
     )
 
+# Columns exactly as described in CONTEXT-brasaland ("2. Data structure").
+EXPECTED_COLUMNS = (
+    "month",
+    "revenue_usd",
+    "covers_served",
+    "avg_ticket_usd",
+    "market",
+)
+# The model target is revenue_usd from the "consolidated" market row.
+CONSOLIDATED_MARKET = "consolidated"
+
 FEATURES = ["year", "month_num", "covers_served", "avg_ticket_usd"]
 TARGET = "revenue_usd"
 
@@ -70,13 +81,29 @@ TEST_START_YEAR = 2024  # 2 most recent years: 2024-2025
 # 1. DATA PREPARATION & SPLIT
 # ==========================================
 def load_and_prepare_data(path: Path | None = None) -> pd.DataFrame:
-    """Load the raw dataset and engineer the time features used for regression."""
+    """Load the raw dataset and engineer the time features used for regression.
+
+    Validates that the file carries exactly the columns documented in
+    CONTEXT-brasaland, then keeps the "consolidated" market rows (the CONTEXT
+    designates them as the model's main rows / target source).
+    """
     if path is None:
         path = resolve_dataset_path()
     df = pd.read_csv(path)
 
+    # Verify the schema matches the CONTEXT-company description.
+    missing = [col for col in EXPECTED_COLUMNS if col not in df.columns]
+    if missing:
+        raise ValueError(
+            f"Dataset is missing CONTEXT-specified columns {missing}. "
+            f"Found columns: {list(df.columns)}"
+        )
+
     # Handle empty values (if any).
     df = df.dropna()
+
+    # CONTEXT: use the "consolidated" market row as the main model row.
+    df = df[df["market"] == CONSOLIDATED_MARKET].copy()
 
     # Convert 'month' to datetime and extract time features.
     df["month"] = pd.to_datetime(df["month"])
