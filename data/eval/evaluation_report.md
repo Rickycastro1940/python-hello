@@ -1,71 +1,131 @@
-# Brasaland Sales Model — Technical Evaluation Report (WORK IN PROGRESS)
+# Brasaland Sales Model — Technical Evaluation Report
 
-Evaluation of the `RandomForestRegressor` sales forecaster (see `src/app.py`)
-requested by the tech-lead ticket before promotion to staging.
+Formal evaluation of the `RandomForestRegressor` sales forecaster (`src/app.py`),
+requested by the tech-lead ticket before promoting the model to staging.
+Generated with `uv run python src/evaluate_model.py` (metrics in
+`data/eval/metrics.json`, learning curve in `data/eval/learning_curve.png`).
 
 Reference: `content/contexts/sales-forecasting/brasaland/CONTEXT-brasaland.en.md`.
 
 ---
 
-## 1. Business cost of errors (from CONTEXT-brasaland)
+## 1. Business cost of errors & metric choice (from CONTEXT-brasaland)
 
-The model feeds purchasing decisions: **Felipe (Operations)** anticipates
-ingredient purchases from the expected trend, and **Lucía (Procurement)**
-buys ahead of **meat price fluctuations** based on projected volume. Brasaland
-is a churrascaria, so its dominant input is **perishable meat**.
+The model feeds purchasing: **Felipe (Operations)** anticipates ingredient
+purchases from the expected trend, and **Lucía (Procurement)** buys ahead of
+**meat price fluctuations** based on projected volume. Brasaland is a
+churrascaria, so its dominant input is **perishable meat**.
 
-| Error type | What it means | Business consequence |
+| Error type | Consequence |
+|---|---|
+| **Under-forecast** (pred < actual) | Stockouts in peak months, lost revenue, and reactive meat purchases at higher spot prices |
+| **Over-forecast** (pred > actual) | Over-buying perishable meat → spoilage/waste and tied-up capital |
+
+The most damaging errors are the **large single misses** (e.g. the December
+holiday peaks): a big miss there is either a major stockout or a major
+perishable overstock.
+
+**Primary metric: RMSE** — it penalizes large errors quadratically, so it
+reflects Brasaland's real risk where a few big misses dominate. **MAE** is
+reported alongside as the average USD miss (interpretability), but it is less
+aligned with the "large errors hurt disproportionately" reality here.
+
+---
+
+## 2. Time-aware cross-validation (`TimeSeriesSplit`, 5 folds, no shuffle)
+
+Cross-validation over the 96-month training window (2016-2023). Folds are
+chronological (expanding window); no shuffling — each validation fold is
+strictly later in time than its training portion.
+
+| Metric | Validation (mean ± std) | Train (mean ± std) |
 |---|---|---|
-| **Under-forecast** (predicted < actual) | We expect fewer sales than happen | Stockouts during peak demand (e.g. December), lost revenue and guest dissatisfaction, and forced reactive meat purchases at higher spot prices |
-| **Over-forecast** (predicted > actual) | We expect more sales than happen | Over-purchasing perishable meat → spoilage/waste and tied-up capital |
+| **RMSE** | **33,688 ± 6,984 USD** | 7,678 ± 1,892 USD |
+| **MAE** | **25,768 ± 6,477 USD** | 5,471 ± 1,262 USD |
 
-Both are costly, but the **largest single misses are the most damaging** — a big
-miss in a high-revenue month (December) means either a major stockout or a major
-perishable overstock. Because the model's biggest errors are concentrated at the
-December peaks, the metric we prioritize should **penalize large errors more**.
-
-### Primary metric choice: RMSE (with MAE reported alongside)
-- **RMSE** penalizes large errors quadratically → it reflects Brasaland's real
-  cost, where a few big misses (holiday peaks) dominate the operational risk.
-- **MAE** (linear) is reported for interpretability (average USD miss) but is
-  less aligned with the "large errors hurt disproportionately" reality here.
-
-_(This justification is required by the module; final numbers below.)_
+Validation RMSE per fold: `[25,119, 42,634, 30,219, 29,167, 41,300]`.
+Reference scale: mean monthly training revenue ≈ **605,468 USD** (so validation
+RMSE ≈ 5.6% of the monthly mean; training RMSE ≈ 1.3%).
 
 ---
 
-## 2. Time-aware cross-validation  _(TODO — to implement)_
+## 3. Learning curve
 
-- Strategy: `TimeSeriesSplit`, ≥5 folds over the training window (2016-2023),
-  chronological order preserved (no shuffling).
-- Result: report chosen metric as **mean ± std** across folds.
+![Learning curve](learning_curve.png)
 
-> _Results pending implementation (`src/evaluate_model.py`)._
+Chronological expanding-window curve: train on a growing prefix of history,
+validate on a **fixed 24-month future block** (the last 2 training years).
 
----
+| Train size (months) | 12 | 24 | 36 | 48 | 60 | 72 |
+|---|---|---|---|---|---|---|
+| Training RMSE (USD) | 13,206 | 8,216 | 5,829 | 6,636 | 7,822 | 6,936 |
+| Validation RMSE (USD) | 161,313 | 129,135 | 114,503 | 70,303 | 59,688 | 37,653 |
 
-## 3. Learning curve  _(TODO — to implement)_
-
-- Plot training error vs validation error as the training set grows.
-- Image saved to `data/eval/learning_curve.png`.
-
-> _Interpretation pending._
-
----
-
-## 4. Metrics (train vs validation)  _(TODO — to implement)_
-
-| Metric | Train | Validation |
-|---|---|---|
-| MAE | _pending_ | _pending_ |
-| RMSE | _pending_ | _pending_ |
+**Pattern:** training error is consistently **low and flat** (~6–13k), while
+validation error is **much higher but drops steeply** as more history is added
+(161k → 38k). A **wide gap persists** between the two lines even at the largest
+training size, but it is **shrinking** as data grows.
 
 ---
 
-## 5. Diagnosis & corrective action  _(TODO — to implement)_
+## 4. Metrics (train vs validation)
 
-- Classification: **well fitted / underfitting / overfitting** — backed by the
-  learning curve and CV spread.
-- Concrete, root-cause corrective action (not a generic "add more data").
+| Metric | Train (resubstitution) | Train (CV) | Validation (CV) |
+|---|---|---|---|
+| MAE  | 4,981 | 5,471 ± 1,262 | **25,768 ± 6,477** |
+| RMSE | 7,268 | 7,678 ± 1,892 | **33,688 ± 6,984** |
 
-> _Diagnosis pending evidence from sections 2-4._
+---
+
+## 5. Diagnosis: OVERFITTING (high variance)
+
+The evidence points to **overfitting**, i.e. high variance:
+
+- **Wide train↔validation gap.** Validation RMSE (33,688) is **~4.4×** the
+  training RMSE (7,678); training error is only ~1.3% of the monthly mean while
+  validation error is ~5.6%. Low training error + substantially higher
+  validation error is the signature of a model that memorizes the training
+  months rather than generalizing.
+- **Learning curve confirms it.** The gap between the low, flat training curve
+  and the high validation curve is large and persistent (not converging at a
+  common low error → not well-fitted; training error is low, not high → not
+  underfitting). The validation curve is still **declining** at 72 months,
+  meaning the variance is data-limited.
+
+This is **not underfitting** (training error is low, so the model captures the
+in-sample pattern) and **not a good fit** (the validation gap is too wide).
+
+### Root cause
+The Random Forest uses scikit-learn defaults — `max_depth=None` and
+`min_samples_leaf=1` — so its 100 unbounded trees can drive each leaf down to a
+single month, memorizing training noise. That produces the near-zero training
+error and the wide validation gap. The elevated validation level is compounded
+by a **structural** issue: the strongest feature (`covers_served`) and the
+target grow over time, and tree models cannot extrapolate beyond the training
+range, so future months are systematically under-predicted (the same effect
+that produced a high PSI and the December under-forecast on the real test set).
+
+### Corrective action (specific, not generic)
+1. **Regularize the Random Forest to cut variance (primary).** Increase
+   `min_samples_leaf` (≈3–5) and cap `max_depth` (e.g. 6–10); optionally lower
+   `max_features`. This directly attacks the memorization that creates the
+   low-train / high-validation gap. Re-tune these via the same `TimeSeriesSplit`
+   CV and confirm the gap narrows.
+2. **Make the target extrapolable (structural).** Because trees can't
+   extrapolate the growth trend, model a **detrended / relative** target — e.g.
+   revenue-per-cover or year-over-year growth — or add an explicit trend
+   feature / linear-trend + RF-residual hybrid. This targets the elevated
+   validation floor and the December peak misses.
+
+> Explicitly **not** the fix: "just add more data." We already use all 8 years
+> of available history and cannot obtain more past months; the learning curve's
+> continued decline reflects variance, which regularization + trend-aware
+> features address directly.
+
+---
+
+## 6. Recommendation
+
+**Do not promote as-is.** The model is overfitting. Apply regularization (1) and
+re-evaluate with the same time-aware CV; if the December/trend miss persists,
+add the trend-aware target/features (2) before promotion to staging.
