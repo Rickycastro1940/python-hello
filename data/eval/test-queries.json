@@ -1,0 +1,56 @@
+{
+  "collection": "brasaland_knowledge_base",
+  "description": "Test questions for the Brasaland RAG knowledge base (Milestone 7). Each question maps to the source document that should be retrieved in the top results, with the expected fact for faithfulness checking.",
+  "queries": [
+    {
+      "question": "How many points do I need for the Gold tier?",
+      "expected_source_document": "loyalty-program",
+      "expected_answer": "50 or more points (Gold: 15% permanent discount and early access to the seasonal menu)."
+    },
+    {
+      "question": "At how many points can I start redeeming, and in what increments?",
+      "expected_source_document": "loyalty-program",
+      "expected_answer": "Redemption starts at 15 accumulated points, in increments of 5 (every 5 points = 20,000 COP / 20 USD discount)."
+    },
+    {
+      "question": "Can I use my Brasa Points on delivery orders?",
+      "expected_source_document": "loyalty-program",
+      "expected_answer": "Yes, they apply the same way as in-store as long as the order is placed through the app."
+    },
+    {
+      "question": "Does the BBQ Ribs dish have allergens?",
+      "expected_source_document": "menu-allergens",
+      "expected_answer": "Contains soy (sauce) and may contain trace peanuts; there is no certified gluten-free version. Zero cross-contamination risk is never guaranteed."
+    },
+    {
+      "question": "Is the Classic Grilled Chicken safe for someone with a nut allergy?",
+      "expected_source_document": "menu-allergens",
+      "expected_answer": "It is declared gluten-free, dairy-free and nut-free, but zero cross-contamination risk is never guaranteed; the server must communicate this for a severe allergy."
+    },
+    {
+      "question": "How much premium meat waste in a week triggers escalation to Felipe Guerrero?",
+      "expected_source_document": "waste-protocol",
+      "expected_answer": "Waste of premium meat protein (tenderloin, ribs) exceeding 5 kg in a week at the same location."
+    },
+    {
+      "question": "What is the operational waste target per location?",
+      "expected_source_document": "waste-protocol",
+      "expected_answer": "Keep total waste below 4% of monthly ingredient cost per location; over 6% for two consecutive months triggers an improvement plan."
+    },
+    {
+      "question": "When must the weekly supplier order be generated?",
+      "expected_source_document": "supplier-ordering",
+      "expected_answer": "Every Monday before 10:00 a.m. local time, by the location manager."
+    },
+    {
+      "question": "What surcharge applies to an emergency supplier order?",
+      "expected_source_document": "supplier-ordering",
+      "expected_answer": "An 8% surcharge over list price."
+    },
+    {
+      "question": "Who must approve an emergency order over 500 USD?",
+      "expected_source_document": "supplier-ordering",
+      "expected_answer": "Lucia Fernandez (Procurement Manager)."
+    }
+  ]
+}
