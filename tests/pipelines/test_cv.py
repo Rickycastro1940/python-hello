@@ -6,10 +6,17 @@ forward in time across folds (no index from a later fold appears before one
 from an earlier fold).
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+import pytest
 
-from src import evaluate_model
+from src import app, evaluate_model
+
+DATASET_PATH = (
+    Path(__file__).resolve().parents[2] / "data" / "raw" / "brasaland_sales.csv"
+)
 
 
 def test_time_series_cv_preserves_chronological_order():
@@ -55,3 +62,26 @@ def test_time_series_cv_no_index_from_later_fold_precedes_earlier_fold():
 
     assert val_indices == sorted(val_indices)
     assert len(val_indices) == len(set(val_indices))  # no repeats across folds
+
+
+@pytest.mark.skipif(
+    not DATASET_PATH.exists(),
+    reason=f"Provided dataset not found at {DATASET_PATH}.",
+)
+def test_time_series_cv_preserves_month_order_on_brasaland_data():
+    """On the real Brasaland training data, each fold's train `month`s precede its validation `month`s."""
+    df = app.load_and_prepare_data().sort_values("month").reset_index(drop=True)
+    train_df, _ = app.split_data(df)
+    months = train_df["month"].reset_index(drop=True)
+
+    cv = evaluate_model.make_time_series_cv(n_splits=5)
+    prev_val_max_month = None
+    for train_idx, val_idx in cv.split(train_df):
+        train_months = months.iloc[train_idx]
+        val_months = months.iloc[val_idx]
+        # Every training month is strictly earlier than every validation month.
+        assert train_months.max() < val_months.min()
+        # Validation windows advance in calendar time across folds.
+        if prev_val_max_month is not None:
+            assert val_months.min() > prev_val_max_month
+        prev_val_max_month = val_months.max()

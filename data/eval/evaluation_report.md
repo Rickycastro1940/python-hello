@@ -14,7 +14,8 @@ Reference: `content/contexts/sales-forecasting/brasaland/CONTEXT-brasaland.en.md
 The model feeds purchasing: **Felipe (Operations)** anticipates ingredient
 purchases from the expected trend, and **Lucía (Procurement)** buys ahead of
 **meat price fluctuations** based on projected volume. Brasaland is a
-churrascaria, so its dominant input is **perishable meat**.
+grilled-food restaurant chain (14 locations across Colombia and Florida), and
+**meat** is its primary perishable input.
 
 | Error type | Consequence |
 |---|---|
