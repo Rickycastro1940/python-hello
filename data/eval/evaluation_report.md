@@ -122,37 +122,57 @@ The evidence points to **overfitting**, i.e. high variance:
 This is **not underfitting** (training error is low, so the model captures the
 in-sample pattern) and **not a good fit** (the validation gap is too wide).
 
-### Root cause
+### Root cause (two components, isolated by experiment)
 The Random Forest uses scikit-learn defaults — `max_depth=None` and
-`min_samples_leaf=1` — so its 100 unbounded trees can drive each leaf down to a
-single month, memorizing training noise. That produces the near-zero training
-error and the wide validation gap. The elevated validation level is compounded
-by a **structural** issue: the strongest feature (`covers_served`) and the
-target grow over time, and tree models cannot extrapolate beyond the training
-range, so future months are systematically under-predicted (the same effect
-that produced a high PSI and the December under-forecast on the real test set).
+`min_samples_leaf=1` — so its 100 unbounded trees drive each leaf toward a
+single month, memorizing training noise (the variance / low-train-error part).
+But the **dominant** driver of the validation error is **structural bias**: the
+strongest feature (`covers_served`) and the target both grow over time, and tree
+models cannot extrapolate beyond the training target range, so future months are
+systematically under-predicted (the same effect behind the high PSI and the
+December under-forecast on the real test set).
 
-### Corrective action (specific, not generic)
-1. **Regularize the Random Forest to cut variance (primary).** Increase
-   `min_samples_leaf` (≈3–5) and cap `max_depth` (e.g. 6–10); optionally lower
-   `max_features`. This directly attacks the memorization that creates the
-   low-train / high-validation gap. Re-tune these via the same `TimeSeriesSplit`
-   CV and confirm the gap narrows.
-2. **Make the target extrapolable (structural).** Because trees can't
-   extrapolate the growth trend, model a **detrended / relative** target — e.g.
-   revenue-per-cover or year-over-year growth — or add an explicit trend
-   feature / linear-trend + RF-residual hybrid. This targets the elevated
-   validation floor and the December peak misses.
+I isolated the two components by re-running the **same time-aware CV** with a
+regularized RF (`max_depth=6`, `min_samples_leaf=4`):
 
-> Explicitly **not** the fix: "just add more data." We already use all 8 years
-> of available history and cannot obtain more past months; the learning curve's
-> continued decline reflects variance, which regularization + trend-aware
-> features address directly.
+| Model | Train RMSE | Validation RMSE | val/train gap |
+|---|---|---|---|
+| Default RF (`max_depth=None`, `min_samples_leaf=1`) | 7,678 | 33,688 | 4.39 |
+| Regularized RF (`max_depth=6`, `min_samples_leaf=4`) | 21,800 | 46,219 | 2.12 |
+
+Regularization **narrows the gap** (4.39 → 2.12) — confirming a real variance
+component — **but validation RMSE gets worse** (33,688 → 46,219). That is the
+key evidence: if the problem were only variance, reducing complexity would help
+validation; instead it hurts, because shallower trees track the rising level
+even less well. So the bottleneck is **trend-extrapolation bias**, not variance.
+
+### Corrective action (specific, root-cause-justified — reproduce via `regularization_experiment`)
+1. **Primary — make the target extrapolable (fix the dominant bias).** Model a
+   **detrended / relative** target instead of raw USD: e.g. predict
+   **revenue-per-cover** (then multiply by a covers forecast), or **year-over-year
+   growth**, or fit an explicit **linear trend and have the RF predict the
+   residual**. Justification: the learning-curve validation error keeps falling
+   as history grows (bias from incomplete trend coverage), and the experiment
+   above shows plain regularization *worsens* validation — both point to trend
+   bias, which detrending removes so the model can extrapolate the growth.
+2. **Secondary — light regularization, but only after detrending.** A modest
+   `min_samples_leaf`/`max_depth`, **tuned on the same `TimeSeriesSplit` CV**,
+   trims the residual variance gap. It must come *after* (1): applied to the raw
+   target it degrades validation (shown above), so it is not a standalone fix.
+
+> Explicitly **rejected** generic answers:
+> - *"Just add more data"* — we already use all 8 years of history and cannot
+>   buy more past months; the gap is driven by trend bias, not sample count.
+> - *"Just increase complexity"* — the RF already memorizes the training set
+>   (train RMSE ≈ 1.3% of mean); more complexity worsens variance, not the bias.
 
 ---
 
 ## 6. Recommendation
 
-**Do not promote as-is.** The model is overfitting. Apply regularization (1) and
-re-evaluate with the same time-aware CV; if the December/trend miss persists,
-add the trend-aware target/features (2) before promotion to staging.
+**Do not promote as-is** — the model is overfitting (high variance) **and**, more
+importantly, biased against the upward trend. Fix the target so it is
+extrapolable (corrective action 1), then add light, CV-tuned regularization
+(action 2), and re-run this exact evaluation (`uv run python src/evaluate_model.py`)
+to confirm both the val/train gap and the validation RMSE improve before
+promotion to staging.

@@ -219,6 +219,53 @@ def diagnose(cv: dict, target_mean: float) -> dict:
     }
 
 
+def regularization_experiment(X_train, y_train, n_splits: int = N_SPLITS) -> dict:
+    """Evidence for the corrective action: does regularizing narrow the gap?
+
+    Compares the default RF against a regularized RF (shallower trees, larger
+    leaves) under the same time-aware CV. A narrower val/train ratio confirms
+    the gap is variance-driven; if validation RMSE nonetheless worsens, the
+    dominant error is structural bias (trend extrapolation), not variance.
+    """
+    cv = make_time_series_cv(n_splits)
+
+    def cv_gap(estimator) -> dict:
+        raw = cross_validate(
+            estimator,
+            X_train,
+            y_train,
+            cv=cv,
+            scoring="neg_root_mean_squared_error",
+            return_train_score=True,
+        )
+        train = float(-raw["train_score"].mean())
+        val = float(-raw["test_score"].mean())
+        return {
+            "train_rmse": train,
+            "val_rmse": val,
+            "val_over_train": val / train,
+        }
+
+    regularized = Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            (
+                "model",
+                RandomForestRegressor(
+                    n_estimators=100,
+                    random_state=RANDOM_STATE,
+                    max_depth=6,
+                    min_samples_leaf=4,
+                ),
+            ),
+        ]
+    )
+    return {
+        "default": cv_gap(build_estimator()),
+        "regularized_maxdepth6_minleaf4": cv_gap(regularized),
+    }
+
+
 def main() -> None:
     X_train, y_train = load_training_frame()
     target_mean = float(y_train.mean())
@@ -256,6 +303,23 @@ def main() -> None:
     diagnosis = diagnose(cv, target_mean)
     print(f"\nDiagnosis: {diagnosis['label'].upper()} — {diagnosis}")
 
+    experiment = regularization_experiment(X_train, y_train)
+    d = experiment["default"]
+    r = experiment["regularized_maxdepth6_minleaf4"]
+    print("\nCorrective-action evidence (same time-aware CV):")
+    print(
+        f"  default RF     : train {d['train_rmse']:,.0f} | val "
+        f"{d['val_rmse']:,.0f} | val/train {d['val_over_train']:.2f}"
+    )
+    print(
+        f"  regularized RF : train {r['train_rmse']:,.0f} | val "
+        f"{r['val_rmse']:,.0f} | val/train {r['val_over_train']:.2f}"
+    )
+    print(
+        "  -> regularization narrows the gap but worsens validation => the "
+        "dominant error is trend-extrapolation bias, not pure variance."
+    )
+
     metrics = {
         "target_mean_usd": target_mean,
         "cross_validation": cv,
@@ -266,6 +330,7 @@ def main() -> None:
             "val_rmse": [float(r) for r in val_rmse],
         },
         "diagnosis": diagnosis,
+        "regularization_experiment": experiment,
     }
     METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
     METRICS_PATH.write_text(json.dumps(metrics, indent=2))

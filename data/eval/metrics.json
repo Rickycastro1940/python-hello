@@ -64,5 +64,17 @@
     "train_rmse_pct_of_mean": 1.27,
     "val_rmse_pct_of_mean": 5.56,
     "val_over_train_ratio": 4.39
+  },
+  "regularization_experiment": {
+    "default": {
+      "train_rmse": 7678.3055765890695,
+      "val_rmse": 33687.60330120786,
+      "val_over_train": 4.387374657752667
+    },
+    "regularized_maxdepth6_minleaf4": {
+      "train_rmse": 21800.144951138627,
+      "val_rmse": 46219.28032294744,
+      "val_over_train": 2.120136376457139
+    }
   }
 }
