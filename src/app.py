@@ -144,13 +144,19 @@ def split_data(df: pd.DataFrame):
 # 2. MODEL TRAINING & JUSTIFICATION
 # ==========================================
 """
-JUSTIFICATION FOR RANDOM FOREST:
-We chose Random Forest over XGBoost for this Finance RFI because of its high
-explainability. While XGBoost trains sequentially and might squeeze out
-slightly better accuracy, it acts more like a black box. Random Forest trains
-multiple independent decision trees on different subsets of the data and
-averages them. This makes it much easier to explain the prediction variability
-and feature importance to business stakeholders.
+MODEL CHOICE — Random Forest (scikit-learn `RandomForestRegressor`) over XGBoost:
+
+1. Prediction-variability band (a CONTEXT deliverable): Random Forest is an
+   ensemble of *independent* trees, so we can read a prediction interval
+   straight from the spread of per-tree predictions (see `plot_forecast`).
+   XGBoost's trees are sequential/additive and don't give this per-tree spread
+   for free.
+2. Explainability for Finance: bagged independent trees + `feature_importances_`
+   are straightforward to explain to Mariana/Felipe; XGBoost's boosted residual
+   fitting behaves more like a black box.
+3. Small, low-noise dataset (120 monthly rows): Random Forest is robust and
+   needs almost no tuning here, whereas XGBoost's edge shows mostly on larger,
+   noisier data and would need careful regularization to avoid overfitting.
 """
 
 
@@ -179,10 +185,23 @@ def scale_features(X_train, X_test):
 
 
 def train_model(X_train, y_train) -> RandomForestRegressor:
-    """Fit the Random Forest regressor on the training window."""
+    """Fit a scikit-learn Random Forest regressor on the training window.
+
+    See the MODEL CHOICE note above for why Random Forest is preferred over
+    XGBoost for this forecasting task.
+    """
     model = RandomForestRegressor(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
     return model
+
+
+def feature_importances(model, feature_names=None) -> dict:
+    """Map feature names to the fitted Random Forest's importances (explainability)."""
+    names = list(feature_names) if feature_names is not None else list(FEATURES)
+    return {
+        name: float(importance)
+        for name, importance in zip(names, model.feature_importances_)
+    }
 
 
 # ==========================================
@@ -318,6 +337,14 @@ def main() -> None:
     model = train_model(X_train, y_train)
     results = evaluate(model, X_test, y_test, y_train)
     y_pred = results["y_pred"]
+
+    print("Model: scikit-learn RandomForestRegressor (n_estimators=100)")
+    importances = feature_importances(model)
+    ranked = sorted(importances.items(), key=lambda kv: kv[1], reverse=True)
+    print(
+        "Feature importances: "
+        + ", ".join(f"{name}={imp:.4f}" for name, imp in ranked)
+    )
 
     print("--- Model Evaluation Metrics ---")
     print(f"MSE: {results['mse']:,.2f}")

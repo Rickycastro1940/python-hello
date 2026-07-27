@@ -107,6 +107,30 @@ def test_scale_features_uses_train_stats_only():
     assert np.allclose(X_test_s["a"].to_numpy(), expected_a.to_numpy())
 
 
+def test_train_model_and_feature_importances():
+    """train_model returns a fitted sklearn RF and importances cover all features."""
+    from sklearn.ensemble import RandomForestRegressor
+
+    rng = np.random.default_rng(3)
+    X = pd.DataFrame(
+        {
+            "year": rng.integers(2016, 2024, size=60),
+            "month_num": rng.integers(1, 13, size=60),
+            "covers_served": rng.integers(30000, 80000, size=60),
+            "avg_ticket_usd": rng.uniform(11, 13, size=60),
+        }
+    )
+    y = X["covers_served"] * X["avg_ticket_usd"]
+
+    model = app.train_model(X, y)
+    assert isinstance(model, RandomForestRegressor)
+
+    importances = app.feature_importances(model, X.columns)
+    assert set(importances) == set(X.columns)
+    assert all(v >= 0 for v in importances.values())
+    assert sum(importances.values()) == pytest.approx(1.0, abs=1e-6)
+
+
 def test_null_and_empty_values_are_dropped(tmp_path):
     """Rows with null/empty/whitespace in required columns are removed."""
     csv = tmp_path / "sales.csv"

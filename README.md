@@ -18,6 +18,14 @@ You can create and include as many python files (a.k.a. modules) as you want usi
 
 Make sure you have Python installed in your computer. We strongly recommend [installing Python through Pyenv ](https://4geeks.com/how-to/what-is-pyenv-and-how-to-install-pyenv) to avoid version conflicts in the future.
 
+## Model Choice: Random Forest (scikit-learn)
+
+The sales forecaster (`src/app.py`) trains a scikit-learn `RandomForestRegressor`. We chose Random Forest over XGBoost because:
+
+* **Prediction-variability band.** Random Forest's independent trees let us derive a 90% prediction interval directly from the per-tree spread — this is a required deliverable. XGBoost's sequential/additive trees don't provide that per-tree spread out of the box.
+* **Explainability for Finance.** Bagged independent trees plus `feature_importances_` are easy to explain to business stakeholders; boosting behaves more like a black box.
+* **Fits the data.** On this small, low-noise dataset (120 monthly rows) Random Forest is robust with almost no tuning, whereas XGBoost's advantage appears mainly on larger, noisier datasets and needs careful regularization to avoid overfitting.
+
 ## Metric Explanations for the Finance Team
 * **MSE (Mean Squared Error):** Measures the average squared difference between our forecasted revenue and the actual revenue. *Why low MSE isn't enough:* It heavily penalizes large outliers but doesn't tell us if our model's underlying distribution of predictions remains stable over time or if it's biased in one direction.
 * **PSI (Population Stability Index):** Measures how much the distribution of our predicted sales shifts compared to the historical training data. A low PSI (< 0.1) confirms the model is stable and hasn't drifted.
