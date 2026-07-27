@@ -71,6 +71,25 @@ def make_time_series_cv(n_splits: int = N_SPLITS) -> TimeSeriesSplit:
     return TimeSeriesSplit(n_splits=n_splits)
 
 
+def verify_chronological_folds(n_samples: int, n_splits: int = N_SPLITS) -> dict:
+    """Explicitly confirm no fold shuffles/mixes data (chronological order kept).
+
+    For every fold: indices are ascending, all training indices come strictly
+    before the validation indices, and validation windows advance in time.
+    Raises AssertionError if any fold violates temporal order.
+    """
+    cv = make_time_series_cv(n_splits)
+    indices = np.arange(n_samples).reshape(-1, 1)
+    prev_val_max = -1
+    for train_idx, val_idx in cv.split(indices):
+        assert list(train_idx) == sorted(train_idx), "training fold is shuffled"
+        assert list(val_idx) == sorted(val_idx), "validation fold is shuffled"
+        assert max(train_idx) < min(val_idx), "train not strictly before validation"
+        assert min(val_idx) > prev_val_max, "validation window went backwards"
+        prev_val_max = max(val_idx)
+    return {"n_splits": n_splits, "chronological_order_preserved": True}
+
+
 def load_training_frame():
     """Return the chronologically-sorted training features/target (2016-2023)."""
     df = app.load_and_prepare_data().sort_values("month").reset_index(drop=True)
@@ -204,6 +223,12 @@ def main() -> None:
     X_train, y_train = load_training_frame()
     target_mean = float(y_train.mean())
     print(f"Training window: {len(X_train)} months | mean revenue {target_mean:,.0f} USD")
+
+    verify_chronological_folds(len(X_train))
+    print(
+        f"\nChronological check: all {N_SPLITS} TimeSeriesSplit folds preserve "
+        "temporal order (train strictly before validation, no shuffling)."
+    )
 
     cv = time_series_cross_validate(X_train, y_train)
     print(f"\nTime-aware CV ({cv['n_splits']} folds, TimeSeriesSplit, no shuffle):")
