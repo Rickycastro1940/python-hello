@@ -299,8 +299,16 @@ def evaluate(model, X_test, y_test, y_train) -> dict:
 # ==========================================
 # 4. VISUALIZATION (PREDICTIONS + VARIABILITY)
 # ==========================================
-def plot_forecast(model, test_df, X_test, y_test, y_pred, path: Path = FIGURE_PATH):
-    """Plot actual vs predicted revenue with a 90% per-tree variability band."""
+def plot_forecast(
+    model, test_df, X_test, y_test, y_pred, path: Path = FIGURE_PATH, metrics=None
+):
+    """Plot the model's prediction and its 90% variability area vs the real data.
+
+    The variability area is the 5th-95th percentile band of the individual tree
+    predictions (a Random-Forest prediction interval), drawn against the actual
+    revenue of the 2 test years. If `metrics` is provided, a small summary box
+    is annotated on the chart.
+    """
     # Extract predictions from all trees to build the variability band.
     tree_preds = np.array(
         [tree.predict(X_test.values) for tree in model.estimators_]
@@ -319,9 +327,10 @@ def plot_forecast(model, test_df, X_test, y_test, y_pred, path: Path = FIGURE_PA
     plt.plot(
         test_df["month"],
         y_pred,
-        label="Predicted Revenue",
+        label="Predicted Revenue (RF mean)",
         color="red",
         linestyle="--",
+        marker="x",
     )
     plt.fill_between(
         test_df["month"],
@@ -329,14 +338,34 @@ def plot_forecast(model, test_df, X_test, y_test, y_pred, path: Path = FIGURE_PA
         upper_bound,
         color="red",
         alpha=0.2,
-        label="90% Prediction Variability",
+        label="90% Prediction Variability (per-tree 5th-95th pct)",
     )
 
     plt.title("Brasaland Sales Forecasting (Test Set: 2024-2025)")
     plt.xlabel("Date")
     plt.ylabel("Revenue (USD)")
-    plt.legend()
+    plt.legend(loc="upper left")
     plt.grid(True)
+
+    if metrics is not None:
+        summary = (
+            f"RMSE: {metrics['rmse']:,.0f} USD\n"
+            f"MAPE: {metrics['mape']:.2f}%\n"
+            f"PSI: {metrics['psi']:.3f}\n"
+            f"Gini: {metrics['gini']:.3f}\n"
+            f"K2: {metrics['k2_tau']:.3f}"
+        )
+        plt.gca().text(
+            0.99,
+            0.03,
+            summary,
+            transform=plt.gca().transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=9,
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.8},
+        )
+
     plt.tight_layout()
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -388,7 +417,9 @@ def main() -> None:
     print(f"Gini: {results['gini']:.4f}")
     print(f"K2 Score (Kendall Tau proxy): {results['k2_tau']:.4f}")
 
-    figure_path = plot_forecast(model, test_df, X_test, y_test, y_pred)
+    figure_path = plot_forecast(
+        model, test_df, X_test, y_test, y_pred, metrics=results
+    )
     print(f"Saved forecast plot to {figure_path}")
 
 
