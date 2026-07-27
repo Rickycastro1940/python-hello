@@ -187,7 +187,11 @@ def test_end_to_end_pipeline_produces_metrics():
     results = app.evaluate(model, X_test, y_test, y_train)
 
     assert len(results["y_pred"]) == len(test_df)
-    assert np.isfinite(results["mse"]) and results["mse"] > 0
-    assert np.isfinite(results["psi"])
-    assert np.isfinite(results["gini"])
+    # The four required metrics (+ RMSE/MAPE) are all reported on the test set.
+    for key in ("mse", "rmse", "mape", "psi", "gini", "k2_tau"):
+        assert key in results
+        assert np.isfinite(results[key])
+    assert results["mse"] > 0
+    assert results["rmse"] == pytest.approx(np.sqrt(results["mse"]))
+    assert results["mape"] >= 0
     assert -1.0 <= results["k2_tau"] <= 1.0

@@ -251,17 +251,32 @@ def normalized_gini(actual, pred) -> float:
 
 
 def evaluate(model, X_test, y_test, y_train) -> dict:
-    """Compute the RFI metric suite for the fitted model on the test set."""
-    y_pred = model.predict(X_test)
+    """Compute the required metrics on the TEST set (2024-2025).
 
-    mse = mean_squared_error(y_test, y_pred)
+    Reports at least MSE, PSI, Gini and K2 (Kendall-tau). MSE is also translated
+    into RMSE (USD) and MAPE (%) because, per the CONTEXT, that is how Finance
+    actually reads the error.
+    """
+    y_pred = model.predict(X_test)
+    y_test_arr = np.asarray(y_test, dtype=float)
+
+    # MSE (USD^2) on the test set, plus human-readable RMSE / MAPE.
+    mse = float(mean_squared_error(y_test, y_pred))
+    rmse = float(np.sqrt(mse))
+    mape = float(np.mean(np.abs((y_test_arr - y_pred) / y_test_arr)) * 100)
+
+    # PSI: prediction distribution vs the training target (drift signal).
     psi_score = calculate_psi(y_train, y_pred)
-    gini_score = normalized_gini(np.asarray(y_test), y_pred)
+    # Gini: ranking power on the test set.
+    gini_score = normalized_gini(y_test_arr, y_pred)
+    # K2 Score: Kendall-tau dependency between predictions and actuals.
     tau, k2_p_value = stats.kendalltau(y_test, y_pred)
 
     return {
         "y_pred": y_pred,
         "mse": mse,
+        "rmse": rmse,
+        "mape": mape,
         "psi": psi_score,
         "gini": gini_score,
         "k2_tau": tau,
@@ -352,9 +367,12 @@ def main() -> None:
         + ", ".join(f"{name}={imp:.4f}" for name, imp in ranked)
     )
 
-    print("--- Model Evaluation Metrics ---")
-    print(f"MSE: {results['mse']:,.2f}")
-    print(f"PSI: {results['psi']:.4f}")
+    print("--- Model Evaluation Metrics (test set: 2024-2025) ---")
+    print(
+        f"MSE:  {results['mse']:,.2f} USD^2  "
+        f"(RMSE: {results['rmse']:,.2f} USD  |  MAPE: {results['mape']:.2f}%)"
+    )
+    print(f"PSI:  {results['psi']:.4f}")
     print(f"Gini: {results['gini']:.4f}")
     print(f"K2 Score (Kendall Tau proxy): {results['k2_tau']:.4f}")
 
