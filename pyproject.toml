@@ -1,16 +1,20 @@
 [project]
-name = "workspace"
+name = "company-monorepo"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI Engineering monorepo: Brasaland sales forecasting + StreamLoop churn"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "huggingface-hub==0.36.2",
+    "ipykernel>=7.3.0",
+    "jupyter>=1.1.1",
     "matplotlib>=3.11.1",
+    "nbconvert>=7.17.1",
     "numpy>=2.5.1",
     "pandas>=3.0.5",
     "scikit-learn>=1.9.0",
     "scipy>=1.18.0",
+    "seaborn>=0.13.2",
     "tokenizers==0.22.2",
     "torch==2.7.1",
     "transformers==4.57.1",
