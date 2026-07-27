@@ -99,8 +99,18 @@ def load_and_prepare_data(path: Path | None = None) -> pd.DataFrame:
             f"Found columns: {list(df.columns)}"
         )
 
-    # Handle empty values (if any).
-    df = df.dropna()
+    # --- Handle null / empty values before training ---
+    # Treat blank or whitespace-only cells as missing.
+    df = df.replace(r"^\s*$", np.nan, regex=True)
+    # Coerce numeric columns so non-numeric / empty entries become NaN.
+    for col in ("revenue_usd", "covers_served", "avg_ticket_usd"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    # Drop any row missing a required column so the model trains on clean data.
+    rows_before = len(df)
+    df = df.dropna(subset=list(EXPECTED_COLUMNS)).reset_index(drop=True)
+    dropped = rows_before - len(df)
+    if dropped:
+        print(f"Handled null/empty values: dropped {dropped} incomplete row(s).")
 
     # CONTEXT: use the "consolidated" market row as the main model row.
     df = df[df["market"] == CONSOLIDATED_MARKET].copy()
@@ -114,9 +124,18 @@ def load_and_prepare_data(path: Path | None = None) -> pd.DataFrame:
 
 
 def split_data(df: pd.DataFrame):
-    """Split strictly into 8 training years (<=2023) and 2 test years (>=2024)."""
+    """Split strictly into the first 8 years (train) and last 2 years (test).
+
+    Train = years <= 2023, Test = years >= 2024. The two windows are disjoint by
+    construction, so the model never sees any test-year row during training; we
+    assert this explicitly to guard against accidental data leakage.
+    """
     train_df = df[df["year"] <= TRAIN_END_YEAR]
     test_df = df[df["year"] >= TEST_START_YEAR]
+
+    overlap = set(train_df["year"]).intersection(set(test_df["year"]))
+    assert not overlap, f"Train/test leakage detected across years: {overlap}"
+
     return train_df, test_df
 
 
@@ -260,6 +279,10 @@ def main() -> None:
         f"{train_df['year'].max()})  |  "
         f"Test: {len(test_df)} months ({test_df['year'].min()}-"
         f"{test_df['year'].max()})"
+    )
+    print(
+        "Leakage check: train/test year sets are disjoint — "
+        "the model never sees the test years during training."
     )
 
     model = train_model(X_train, y_train)

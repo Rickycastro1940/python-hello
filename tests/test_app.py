@@ -88,6 +88,40 @@ def test_split_is_strict_eight_two_years():
     assert set(train_df["year"]).isdisjoint(set(test_df["year"]))
 
 
+def test_null_and_empty_values_are_dropped(tmp_path):
+    """Rows with null/empty/whitespace in required columns are removed."""
+    csv = tmp_path / "sales.csv"
+    csv.write_text(
+        "month,revenue_usd,covers_served,avg_ticket_usd,market\n"
+        "2016-01-01,100000,2000,50.0,consolidated\n"   # valid
+        "2016-02-01,,2100,50.0,consolidated\n"          # empty revenue
+        "2016-03-01,120000,,51.0,consolidated\n"        # missing covers
+        "2016-04-01,130000,2200,   ,consolidated\n"     # whitespace ticket
+        "2016-05-01,140000,2300,52.0,consolidated\n"    # valid
+    )
+
+    df = app.load_and_prepare_data(csv)
+
+    assert len(df) == 2  # only the two fully-populated rows survive
+    assert (
+        df[["revenue_usd", "covers_served", "avg_ticket_usd"]].notna().all().all()
+    )
+
+
+def test_split_has_no_test_year_leakage(tmp_path):
+    """The training window must never contain any test-year (>=2024) row."""
+    prepared = _synthetic_frame()
+    prepared["month"] = pd.to_datetime(prepared["month"])
+    prepared["year"] = prepared["month"].dt.year
+    prepared["month_num"] = prepared["month"].dt.month
+
+    train_df, test_df = app.split_data(prepared)
+
+    assert train_df["year"].max() < app.TEST_START_YEAR
+    assert test_df["year"].min() > app.TRAIN_END_YEAR
+    assert set(train_df["year"]).isdisjoint(set(test_df["year"]))
+
+
 def test_end_to_end_pipeline_produces_metrics():
     """With the provided dataset present, train and yield finite metrics.
 
