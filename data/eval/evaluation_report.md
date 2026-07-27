@@ -25,10 +25,36 @@ The most damaging errors are the **large single misses** (e.g. the December
 holiday peaks): a big miss there is either a major stockout or a major
 perishable overstock.
 
+### Which direction is more costly? → **Over-estimation**
+The CONTEXT/briefing don't state an explicit policy, so we reason from the
+domain (perishable-inventory "newsvendor" logic):
+
+- **Over-estimating sales** → over-order perishable meat → it **spoils**. This
+  is an **unrecoverable full-cost loss** (we paid for meat we throw away) plus
+  tied-up working capital. Cost ≈ the wasted meat's COGS.
+- **Under-estimating sales** → under-order → **stockout** → we lose the
+  **margin** on unserved covers (we never bought that meat, so no COGS was
+  sunk), partially mitigable by substitution — a smaller per-unit loss than
+  wasted premium meat.
+
+Because wasted premium meat (full COGS) generally exceeds the lost margin of an
+unserved cover, **over-estimation is the more costly error direction** for
+Brasaland, and the forecast should lean slightly conservative.
+
+> ⚠️ **Caveat that matters here:** our model's actual bias is the *opposite* —
+> it systematically **under-forecasts**, especially the December peaks. Most
+> months that under-bias is the "safer" (anti-spoilage) direction, but a
+> December **stockout in the highest-revenue month** is a serious brand hit for
+> a grill chain whose promise is a fast, consistent kitchen. So the model's
+> single most business-relevant flaw is the peak under-forecast — reinforcing
+> the corrective actions in §5.
+
 **Primary metric: RMSE** — it penalizes large errors quadratically, so it
 reflects Brasaland's real risk where a few big misses dominate. **MAE** is
 reported alongside as the average USD miss (interpretability), but it is less
-aligned with the "large errors hurt disproportionately" reality here.
+aligned with the "large errors hurt disproportionately" reality here. If the
+business confirms the spoilage-vs-stockout asymmetry, an **asymmetric loss**
+(penalizing over-prediction more) could be layered on top later.
 
 ---
 
