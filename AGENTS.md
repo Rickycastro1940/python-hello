@@ -8,6 +8,7 @@ This is a small, single Python repository (no monorepo, no containers, no databa
 - Dependency management uses **`uv`** (canonical: `pyproject.toml` + `uv.lock`). `uv` is installed to `~/.local/bin` and the startup update script runs `uv sync`, which creates a project `.venv` (gitignored). Do NOT use `pip`/`pipenv` to add deps — use `uv add <pkg>` (and `uv add --dev <pkg>` for test/dev tools). `requirements.txt` is kept only as a pre-merge fallback and may lag `pyproject.toml`.
 - Run everything through the uv venv with `uv run ...` (e.g. `uv run python src/app.py`, `uv run pytest`). If `uv` is not on `PATH`, call it as `~/.local/bin/uv`. Python is pinned to 3.12 via `.python-version`.
 - Deps are heavy (`torch`, `transformers`, etc.); a clean `uv sync` pulls large CUDA wheels even though inference runs on CPU.
+- Gotcha: if `import torch` fails with a missing shared lib (e.g. `libcudnn.so.9` / nccl), the large CUDA wheels extracted with empty `nvidia/<pkg>/lib` dirs. Repair without touching pins via `uv sync --reinstall-package nvidia-cudnn-cu12 --reinstall-package nvidia-nccl-cu12` (verify with `find .venv -name 'libcudnn*'`). Only the sentiment script needs torch; the forecasting project does not.
 - Version pins that matter: `transformers==4.57.1` / `torch==2.7.1` are pinned on purpose. `transformers` 5.x breaks the sentiment pipeline because `prajjwal1/bert-mini`'s `config.json` has no `model_type` key (4.x tolerated it). Do not bump these without re-testing `sentiment_analysis.py`.
 
 ### Products / how to run
