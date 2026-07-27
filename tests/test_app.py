@@ -107,6 +107,24 @@ def test_scale_features_uses_train_stats_only():
     assert np.allclose(X_test_s["a"].to_numpy(), expected_a.to_numpy())
 
 
+def test_build_comparison_against_test_years():
+    """Comparison table lines up predictions with the real test-year data."""
+    test_df = pd.DataFrame({"month": ["2024-01-01", "2024-02-01", "2024-03-01"]})
+    y_test = [100.0, 200.0, 300.0]
+    y_pred = [110.0, 180.0, 300.0]
+    lower = [90.0, 150.0, 250.0]
+    upper = [130.0, 190.0, 350.0]  # actual=200 (row 2) is ABOVE upper=190
+
+    comp = app.build_comparison(test_df, y_test, y_pred, lower, upper)
+
+    assert list(comp["month"]) == ["2024-01", "2024-02", "2024-03"]
+    assert list(comp["actual_revenue"]) == [100.0, 200.0, 300.0]
+    assert list(comp["error"]) == [10.0, -20.0, 0.0]
+    assert comp["abs_pct_error"].iloc[1] == pytest.approx(10.0)
+    # Row 0 and row 2 fall inside their bands; row 1's actual is above upper.
+    assert list(comp["within_90_band"]) == [True, False, True]
+
+
 def test_train_model_and_feature_importances():
     """train_model returns a fitted sklearn RF and importances cover all features."""
     from sklearn.ensemble import RandomForestRegressor

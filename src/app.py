@@ -299,8 +299,57 @@ def evaluate(model, X_test, y_test, y_train) -> dict:
 # ==========================================
 # 4. VISUALIZATION (PREDICTIONS + VARIABILITY)
 # ==========================================
+def prediction_interval(model, X_test, lower_pct: float = 5, upper_pct: float = 95):
+    """Return (lower, upper) per-month bounds from the spread of the RF trees."""
+    X = X_test.values if hasattr(X_test, "values") else np.asarray(X_test)
+    tree_preds = np.array([tree.predict(X) for tree in model.estimators_])
+    return (
+        np.percentile(tree_preds, lower_pct, axis=0),
+        np.percentile(tree_preds, upper_pct, axis=0),
+    )
+
+
+def build_comparison(test_df, y_test, y_pred, lower=None, upper=None) -> pd.DataFrame:
+    """Build a month-by-month comparison of predictions vs the real test data.
+
+    Columns: month, actual_revenue, predicted_revenue, error, abs_pct_error and
+    (when bounds are given) the 90% band and whether the actual falls inside it.
+    """
+    y_test_arr = np.asarray(y_test, dtype=float)
+    y_pred_arr = np.asarray(y_pred, dtype=float)
+
+    comparison = pd.DataFrame(
+        {
+            "month": pd.to_datetime(test_df["month"]).dt.strftime("%Y-%m").values,
+            "actual_revenue": y_test_arr,
+            "predicted_revenue": y_pred_arr,
+        }
+    )
+    comparison["error"] = comparison["predicted_revenue"] - comparison["actual_revenue"]
+    comparison["abs_pct_error"] = (
+        comparison["error"].abs() / comparison["actual_revenue"] * 100
+    )
+
+    if lower is not None and upper is not None:
+        comparison["lower_90"] = np.asarray(lower, dtype=float)
+        comparison["upper_90"] = np.asarray(upper, dtype=float)
+        comparison["within_90_band"] = (
+            comparison["actual_revenue"] >= comparison["lower_90"]
+        ) & (comparison["actual_revenue"] <= comparison["upper_90"])
+
+    return comparison
+
+
 def plot_forecast(
-    model, test_df, X_test, y_test, y_pred, path: Path = FIGURE_PATH, metrics=None
+    model,
+    test_df,
+    X_test,
+    y_test,
+    y_pred,
+    path: Path = FIGURE_PATH,
+    metrics=None,
+    lower_bound=None,
+    upper_bound=None,
 ):
     """Plot the model's prediction and its 90% variability area vs the real data.
 
@@ -309,12 +358,9 @@ def plot_forecast(
     revenue of the 2 test years. If `metrics` is provided, a small summary box
     is annotated on the chart.
     """
-    # Extract predictions from all trees to build the variability band.
-    tree_preds = np.array(
-        [tree.predict(X_test.values) for tree in model.estimators_]
-    )
-    lower_bound = np.percentile(tree_preds, 5, axis=0)
-    upper_bound = np.percentile(tree_preds, 95, axis=0)
+    # Reuse provided bounds, or derive the band from the per-tree spread.
+    if lower_bound is None or upper_bound is None:
+        lower_bound, upper_bound = prediction_interval(model, X_test)
 
     plt.figure(figsize=(12, 6))
     plt.plot(
@@ -417,8 +463,50 @@ def main() -> None:
     print(f"Gini: {results['gini']:.4f}")
     print(f"K2 Score (Kendall Tau proxy): {results['k2_tau']:.4f}")
 
+    # --- Compare predictions with the real data from the 2 test years ---
+    lower_bound, upper_bound = prediction_interval(model, X_test)
+    comparison = build_comparison(test_df, y_test, y_pred, lower_bound, upper_bound)
+
+    print("\n--- Predicted vs Actual (2 test years: 2024-2025) ---")
+    display = comparison.copy()
+    for col in ("actual_revenue", "predicted_revenue", "error"):
+        display[col] = display[col].map(lambda v: f"{v:,.0f}")
+    display["abs_pct_error"] = display["abs_pct_error"].map(lambda v: f"{v:.2f}%")
+    print(
+        display[
+            ["month", "actual_revenue", "predicted_revenue", "error",
+             "abs_pct_error", "within_90_band"]
+        ].to_string(index=False)
+    )
+
+    coverage = comparison["within_90_band"].mean() * 100
+    total_actual = comparison["actual_revenue"].sum()
+    total_pred = comparison["predicted_revenue"].sum()
+    print(
+        f"\nMonths inside the 90% band: "
+        f"{int(comparison['within_90_band'].sum())}/{len(comparison)} "
+        f"({coverage:.0f}%)"
+    )
+    print(
+        f"Totals over the 2 test years — actual: {total_actual:,.0f} USD  |  "
+        f"predicted: {total_pred:,.0f} USD  |  "
+        f"diff: {(total_pred / total_actual - 1) * 100:+.2f}%"
+    )
+
+    comparison_path = PROJECT_ROOT / "reports" / "test_predictions_vs_actual.csv"
+    comparison_path.parent.mkdir(parents=True, exist_ok=True)
+    comparison.to_csv(comparison_path, index=False)
+    print(f"Saved comparison table to {comparison_path}")
+
     figure_path = plot_forecast(
-        model, test_df, X_test, y_test, y_pred, metrics=results
+        model,
+        test_df,
+        X_test,
+        y_test,
+        y_pred,
+        metrics=results,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
     )
     print(f"Saved forecast plot to {figure_path}")
 
