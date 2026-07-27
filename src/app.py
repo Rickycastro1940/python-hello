@@ -23,6 +23,7 @@ import pandas as pd  # noqa: E402
 import scipy.stats as stats  # noqa: E402
 from sklearn.ensemble import RandomForestRegressor  # noqa: E402
 from sklearn.metrics import mean_squared_error  # noqa: E402
+from sklearn.preprocessing import StandardScaler  # noqa: E402
 
 # Resolve paths relative to this file so the script runs from any working dir.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -153,6 +154,30 @@ and feature importance to business stakeholders.
 """
 
 
+def scale_features(X_train, X_test):
+    """Standardize features using statistics learned ONLY from the training set.
+
+    The features live on very different magnitudes (e.g. `covers_served` in the
+    tens of thousands vs `avg_ticket_usd` ~ 12 and `month_num` 1-12).
+    Standardizing puts them on a comparable scale so magnitude alone can't skew
+    feature-importance / distance comparisons or a future gradient-based model.
+    Fitting the scaler on the training split only avoids leaking test-set
+    statistics into training. Column names and index are preserved.
+    """
+    scaler = StandardScaler()
+    X_train_scaled = pd.DataFrame(
+        scaler.fit_transform(X_train),
+        columns=X_train.columns,
+        index=X_train.index,
+    )
+    X_test_scaled = pd.DataFrame(
+        scaler.transform(X_test),
+        columns=X_test.columns,
+        index=X_test.index,
+    )
+    return X_train_scaled, X_test_scaled, scaler
+
+
 def train_model(X_train, y_train) -> RandomForestRegressor:
     """Fit the Random Forest regressor on the training window."""
     model = RandomForestRegressor(n_estimators=100, random_state=42)
@@ -274,6 +299,10 @@ def main() -> None:
     X_train, y_train = train_df[FEATURES], train_df[TARGET]
     X_test, y_test = test_df[FEATURES], test_df[TARGET]
 
+    # Standardize features (scaler fit on train only) to avoid faulty
+    # magnitude comparisons between columns.
+    X_train, X_test, _ = scale_features(X_train, X_test)
+
     print(
         f"Train: {len(train_df)} months ({train_df['year'].min()}-"
         f"{train_df['year'].max()})  |  "
@@ -284,6 +313,7 @@ def main() -> None:
         "Leakage check: train/test year sets are disjoint — "
         "the model never sees the test years during training."
     )
+    print("Scaled features (StandardScaler, fit on train only): " + ", ".join(FEATURES))
 
     model = train_model(X_train, y_train)
     results = evaluate(model, X_test, y_test, y_train)

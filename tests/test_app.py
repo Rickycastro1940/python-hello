@@ -88,6 +88,25 @@ def test_split_is_strict_eight_two_years():
     assert set(train_df["year"]).isdisjoint(set(test_df["year"]))
 
 
+def test_scale_features_uses_train_stats_only():
+    """Scaler is fit on train only; train is standardized, test uses train stats."""
+    X_train = pd.DataFrame({"a": [0.0, 10.0, 20.0, 30.0], "b": [1.0, 2.0, 3.0, 4.0]})
+    X_test = pd.DataFrame({"a": [40.0, 50.0], "b": [5.0, 6.0]})
+
+    X_train_s, X_test_s, _ = app.scale_features(X_train, X_test)
+
+    # Column names and index are preserved.
+    assert list(X_train_s.columns) == ["a", "b"]
+
+    # Training features are standardized (mean ~0, std ~1 with ddof=0).
+    assert X_train_s["a"].mean() == pytest.approx(0.0, abs=1e-9)
+    assert X_train_s["a"].std(ddof=0) == pytest.approx(1.0)
+
+    # Test rows are transformed with TRAIN statistics (no test leakage).
+    expected_a = (X_test["a"] - X_train["a"].mean()) / X_train["a"].std(ddof=0)
+    assert np.allclose(X_test_s["a"].to_numpy(), expected_a.to_numpy())
+
+
 def test_null_and_empty_values_are_dropped(tmp_path):
     """Rows with null/empty/whitespace in required columns are removed."""
     csv = tmp_path / "sales.csv"
@@ -138,6 +157,7 @@ def test_end_to_end_pipeline_produces_metrics():
     train_df, test_df = app.split_data(df)
     X_train, y_train = train_df[app.FEATURES], train_df[app.TARGET]
     X_test, y_test = test_df[app.FEATURES], test_df[app.TARGET]
+    X_train, X_test, _ = app.scale_features(X_train, X_test)
 
     model = app.train_model(X_train, y_train)
     results = app.evaluate(model, X_test, y_test, y_train)
